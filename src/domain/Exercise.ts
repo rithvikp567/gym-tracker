@@ -23,7 +23,16 @@ export interface ExerciseData {
    * recreating them. Missing in records saved before v0.3.0.
    */
   aliases?: string[];
+  /**
+   * Name keys whose numbers are in another unit than `unit`: an exercise merged in keeps the unit
+   * it was logged in, and switching units with "keep those" pins the old unit on the names logged
+   * so far. Re-importing the sheet reads each name's rows in its unit. Missing = all in `unit`.
+   */
+  keyUnits?: Record<string, LoadUnit>;
 }
+
+/** What the numbers logged so far are when an exercise switches units: still the old unit, or the new one all along. */
+export type PastUnits = "keep" | "relabel";
 
 /** An exercise slot within a workout day (its 3 columns in the old sheet). */
 export class Exercise {
@@ -72,6 +81,11 @@ export class Exercise {
     return this.key === key || this.aliases.includes(key);
   }
 
+  /** The unit of numbers filed under one of its name keys (a sheet row, say): `unit` unless pinned. */
+  unitOf(key: string): LoadUnit {
+    return this.data.keyUnits?.[key] ?? this.unit;
+  }
+
   /** "3×8", "3 sets", "8 reps", "45 min walk", or "". */
   targetLabel(): string {
     if (this.kind === "check") return this.targetText ?? "";
@@ -102,7 +116,44 @@ export class Exercise {
     return new Exercise({ ...this.data, aliases: merged });
   }
 
+  /**
+   * Logged in `unit` from now on. `past` says what the numbers under its names so far are:
+   * "keep" = still the old unit (pinned on its names, so a re-import reads the sheet as before),
+   * "relabel" = the new unit all along. Its saved logs change separately (SetupService.setUnit).
+   */
+  withUnit(unit: LoadUnit, past: PastUnits): Exercise {
+    const old = this.unit;
+    if (unit === old) return this;
+    const keyUnits: Record<string, LoadUnit> = {};
+    for (const key of [this.key, ...this.aliases]) {
+      const was = this.unitOf(key);
+      keyUnits[key] = past === "relabel" && was === old ? unit : was;
+    }
+    return new Exercise({ ...this.data, unit }).withKeyUnits(keyUnits);
+  }
+
+  /**
+   * Takes over another exercise's names (merging it into this one): re-imported rows under them
+   * land here and are read in the unit `other` logged them in.
+   */
+  withNamesOf(other: Exercise): Exercise {
+    const keys = [other.key, ...other.aliases];
+    const next = this.withAliases(keys);
+    const keyUnits = { ...next.data.keyUnits };
+    for (const key of keys) {
+      if (key !== next.key) keyUnits[key] = other.unitOf(key);
+    }
+    return next.withKeyUnits(keyUnits);
+  }
+
   toJSON(): ExerciseData {
     return { ...this.data };
+  }
+
+  /** Stores only the names whose unit differs from `unit` (the rest follow it). */
+  private withKeyUnits(keyUnits: Record<string, LoadUnit>): Exercise {
+    const pinned = Object.entries(keyUnits).filter(([, unit]) => unit !== this.unit);
+    const { keyUnits: _old, ...rest } = this.data;
+    return new Exercise(pinned.length ? { ...rest, keyUnits: Object.fromEntries(pinned) } : rest);
   }
 }

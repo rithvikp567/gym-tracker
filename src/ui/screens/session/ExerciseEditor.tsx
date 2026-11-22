@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Exercise } from "../../../domain/Exercise";
 import { ExerciseLog } from "../../../domain/ExerciseLog";
-import { HALF_PLATE_LB, PLATE_LB, platesToPounds } from "../../../domain/Load";
+import { HALF_PLATE_LB, PLATE_LB, convertLoad, platesToPounds, unitName, type LoadUnit } from "../../../domain/Load";
 import { SetEntry, formatNumber } from "../../../domain/SetEntry";
 import type { PastLog } from "../../../services/SessionService";
 import { Icon } from "../../components/Icon";
@@ -32,9 +32,10 @@ function parse(value: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function toLog(exerciseId: string, draft: Draft): ExerciseLog {
+/** `unit`: what the weights were typed in, saved with them (none for done / not-done exercises). */
+function toLog(exerciseId: string, draft: Draft, unit: LoadUnit | undefined): ExerciseLog {
   const sets = draft.sets.map((s) => new SetEntry(parse(s.weight), parse(s.reps))).filter((s) => !s.isEmpty());
-  return ExerciseLog.empty(exerciseId).withSets(sets).withDone(draft.done).withNote(draft.note);
+  return ExerciseLog.empty(exerciseId).withSets(sets).withDone(draft.done).withNote(draft.note).withUnit(unit);
 }
 
 /** Editing one exercise: sets (weight × reps), done/skipped for cardio, and the day's note. */
@@ -51,13 +52,23 @@ export function ExerciseEditor({
 }) {
   const [draft, setDraft] = useState(() => toDraft(exercise, log, last));
   const save = useDebounced(onSave, 400);
-  const lastSets = last?.log.filledSets() ?? [];
-  const plates = exercise.unit === "plates";
+  // Weights are edited in the unit this day's log was saved in (the exercise's for a new entry),
+  // so switching the exercise's unit never changes what an earlier day's numbers mean.
+  const unit = log?.unit ?? exercise.unit;
+  const plates = unit === "plates";
   const unitPlaceholder = plates ? "plates" : "lb";
+  const lastSets = last?.log.filledSets() ?? [];
+  const lastUnit = last?.log.unitOr(exercise.unit) ?? unit;
+  /** Last time's weight in this editor's unit; null when it can't be said exactly (pounds → plates). */
+  const lastWeight = (s: SetEntry | undefined) => {
+    const weight = s?.weight ?? null;
+    return weight === null ? null : convertLoad(weight, lastUnit, unit);
+  };
+  const weightsCopy = lastSets.every((s) => s.weight === null || lastWeight(s) !== null);
 
   const update = (next: Draft) => {
     setDraft(next);
-    save(toLog(exercise.id, next));
+    save(toLog(exercise.id, next, exercise.kind === "check" ? undefined : unit));
   };
 
   const setWeight = (i: number, value: string) => {
@@ -78,9 +89,10 @@ export function ExerciseEditor({
 
   const removeSet = (i: number) => update({ ...draft, sets: draft.sets.filter((_, j) => j !== i) });
 
+  // Pounds → plates isn't guessed: the reps are copied and the weights left for you to fill in.
   const copyLast = () => {
     if (!last) return;
-    update({ ...draft, sets: lastSets.map((s) => ({ weight: text(s.weight), reps: text(s.reps) })) });
+    update({ ...draft, sets: lastSets.map((s) => ({ weight: text(lastWeight(s)), reps: text(s.reps) })) });
   };
 
   const noteField = (
@@ -120,7 +132,7 @@ export function ExerciseEditor({
             inputMode="decimal"
             enterKeyHint="next"
             aria-label={`Set ${i + 1} weight`}
-            placeholder={lastSets[i]?.weight !== undefined && lastSets[i]?.weight !== null ? text(lastSets[i]!.weight) : unitPlaceholder}
+            placeholder={text(lastWeight(lastSets[i])) || unitPlaceholder}
             value={s.weight}
             onChange={(e) => setWeight(i, e.target.value)}
           />
@@ -140,13 +152,14 @@ export function ExerciseEditor({
         </div>
       ))}
       {plates && <PlatesHint value={parse(draft.sets.find((x) => x.weight.trim())?.weight ?? "")} />}
+      {!plates && unit !== exercise.unit && <p className="plates-hint">Saved in {unitName(unit)}, not {unitName(exercise.unit)}</p>}
       <div className="editor-actions">
         <button type="button" className="btn" onClick={addSet}>
           <Icon name="plus" size={16} /> Set
         </button>
         {last && lastSets.length > 0 && (
           <button type="button" className="btn" onClick={copyLast}>
-            <Icon name="copy" size={16} /> Same as {last.date.shortLabel()}
+            <Icon name="copy" size={16} /> Same {weightsCopy ? "as" : "reps as"} {last.date.shortLabel()}
           </button>
         )}
       </div>

@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import type { Exercise, ExerciseKind } from "../../domain/Exercise";
-import type { LoadUnit } from "../../domain/Load";
+import { useEffect, useId, useState } from "react";
+import type { Exercise, ExerciseKind, PastUnits } from "../../domain/Exercise";
+import { unitName, type LoadUnit } from "../../domain/Load";
 import { WEEKDAY_SHORT, type Weekday } from "../../domain/LocalDate";
 import type { Split } from "../../domain/Split";
 import type { WorkoutDay } from "../../domain/WorkoutDay";
@@ -8,7 +8,8 @@ import { Icon } from "../components/Icon";
 import { BackLink, ScreenHead } from "../components/controls";
 import { useLive, useServices } from "../ServicesContext";
 
-type ExerciseChanges = Partial<{ kind: ExerciseKind; unit: LoadUnit; targetSets: number | null; targetReps: string | null; targetText: string | null }>;
+/** Field edits saved as they are. The unit goes through SetupService.setUnit, which asks about past sessions. */
+type ExerciseChanges = Partial<{ kind: ExerciseKind; targetSets: number | null; targetReps: string | null; targetText: string | null }>;
 
 /**
  * Workout days, their exercises (free-form, as many as you like), and the weekly split.
@@ -149,7 +150,10 @@ function DayCard({
   const sessionsText = (n: number | undefined) => (n === undefined ? "its sessions" : `${n} session${n === 1 ? "" : "s"}`);
 
   const merge = (from: Exercise, into: Exercise) => {
-    const units = from.unit !== into.unit ? ` Note: ${from.name} is logged in ${unitName(from.unit)} and ${into.name} in ${unitName(into.unit)}; numbers aren't converted.` : "";
+    const units =
+      from.kind === "strength" && from.unit !== into.unit
+        ? ` "${from.name}" is logged in ${unitName(from.unit)} and "${into.name}" in ${unitName(into.unit)}: each session keeps its unit, and a day logged under both is combined in pounds.`
+        : "";
     const ok = confirm(
       `Merge "${from.name}" into "${into.name}"? Everything logged in ${sessionsText(sessionsOf(from))} moves over and "${from.name}" goes away. This can't be undone.${units}`,
     );
@@ -172,6 +176,8 @@ function DayCard({
     onRename: (name: string) => edit((d) => d.withExercise(ex.renamed(name))),
     onChange: (changes: ExerciseChanges) => edit((d) => d.withExercise(ex.with(changes))),
     onMerge: (into: Exercise) => merge(ex, into),
+    countInUnit: () => setup.sessionsLoggedIn(day.id, ex.id, ex.unit),
+    onSetUnit: (unit: LoadUnit, past: PastUnits) => void setup.setUnit(day.id, ex.id, unit, past),
   });
 
   return (
@@ -286,10 +292,6 @@ function DayCard({
   );
 }
 
-function unitName(unit: LoadUnit): string {
-  return unit === "plates" ? "plates" : "pounds";
-}
-
 /**
  * One exercise on one line: name, sets × reps (or a target for done/not-done), and a ⋮ for
  * the rest. Active rows can move, change type or unit, merge, or be removed; removed rows can
@@ -304,6 +306,8 @@ function ExerciseFields({
   onRename,
   onChange,
   onMerge,
+  countInUnit,
+  onSetUnit,
   onMove,
   onRemove,
   onRestore,
@@ -318,14 +322,32 @@ function ExerciseFields({
   onRename: (name: string) => void;
   onChange: (changes: ExerciseChanges) => void;
   onMerge: (into: Exercise) => void;
+  /** Sessions with weights saved in the exercise's current unit. */
+  countInUnit: () => Promise<number>;
+  onSetUnit: (unit: LoadUnit, past: PastUnits) => void;
   onMove?: (delta: -1 | 1) => void;
   onRemove?: () => void;
   onRestore?: () => void;
   onDelete?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  /** While asking what earlier sessions are before a unit switch: how many there are. */
+  const [unitAsk, setUnitAsk] = useState<number | null>(null);
+  const askId = useId();
   const isCheck = exercise.kind === "check";
   const archived = exercise.archived;
+  const nextUnit: LoadUnit = exercise.unit === "plates" ? "lb" : "plates";
+
+  const switchUnit = async () => {
+    const n = await countInUnit();
+    // Nothing saved in the current unit means nothing to keep: switch right away.
+    if (n === 0) onSetUnit(nextUnit, "relabel");
+    else setUnitAsk(n);
+  };
+  const answerUnit = (past: PastUnits) => {
+    setUnitAsk(null);
+    onSetUnit(nextUnit, past);
+  };
   return (
     <div className={`ex-edit${menuOpen ? " menu-open" : ""}${archived ? " is-archived" : ""}`}>
       <span className="ex-edit-name">
@@ -373,10 +395,37 @@ function ExerciseFields({
           />
         </span>
       )}
-      <button type="button" className="icon-btn" aria-label={`More for ${exercise.name}`} aria-expanded={menuOpen} onClick={() => setMenuOpen((v) => !v)}>
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label={`More for ${exercise.name}`}
+        aria-expanded={menuOpen}
+        onClick={() => {
+          setMenuOpen((v) => !v);
+          setUnitAsk(null);
+        }}
+      >
         <Icon name="dots" size={18} />
       </button>
-      {menuOpen && (
+      {menuOpen && unitAsk !== null && (
+        // Switching units with sessions saved in the old one: say what those numbers are.
+        <div className="ex-edit-menu">
+          <p className="unit-ask" id={askId}>
+            Log {exercise.name} in {unitName(nextUnit)} from now on? {unitAsk} earlier session{unitAsk === 1 ? " is" : "s are"} saved in{" "}
+            {unitName(exercise.unit)}.
+          </p>
+          <button type="button" className="chip-btn" aria-describedby={askId} autoFocus onClick={() => answerUnit("keep")}>
+            Keep those in {unitName(exercise.unit)}
+          </button>
+          <button type="button" className="chip-btn" aria-describedby={askId} onClick={() => answerUnit("relabel")}>
+            Those were {unitName(nextUnit)}
+          </button>
+          <button type="button" className="chip-btn" onClick={() => setUnitAsk(null)}>
+            Cancel
+          </button>
+        </div>
+      )}
+      {menuOpen && unitAsk === null && (
         <div className="ex-edit-menu">
           {onMove && (
             <>
@@ -399,7 +448,7 @@ function ExerciseFields({
             </button>
           )}
           {!isCheck && (
-            <button type="button" className="chip-btn" onClick={() => onChange({ unit: exercise.unit === "plates" ? "lb" : "plates" })}>
+            <button type="button" className="chip-btn" onClick={() => void switchUnit()}>
               {exercise.unit === "plates" ? "Log in pounds" : "Log in plates"}
             </button>
           )}

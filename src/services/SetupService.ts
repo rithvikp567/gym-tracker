@@ -1,4 +1,7 @@
+import type { PastUnits } from "../domain/Exercise";
+import type { LoadUnit } from "../domain/Load";
 import type { Weekday } from "../domain/LocalDate";
+import type { Session } from "../domain/Session";
 import type { Split } from "../domain/Split";
 import { WorkoutDay } from "../domain/WorkoutDay";
 import type { Repositories } from "./ports";
@@ -64,14 +67,53 @@ export class SetupService {
   }
 
   /**
+   * Sessions with weights logged for the exercise in `unit` (a log saved without a unit counts as
+   * the exercise's): what switching the exercise away from `unit` asks about.
+   */
+  async sessionsLoggedIn(dayId: string, exerciseId: string, unit: LoadUnit): Promise<number> {
+    const exercise = (await this.repos.days.get(dayId))?.exercise(exerciseId);
+    if (!exercise) return 0;
+    const sessions = await this.repos.sessions.forWorkoutDay(dayId);
+    return sessions.filter((s) => {
+      const log = s.log(exerciseId);
+      return log !== undefined && log.topWeight() !== null && log.unitOr(exercise.unit) === unit;
+    }).length;
+  }
+
+  /**
+   * Logs an exercise in `unit` from now on. `past` says what its weights saved in the old unit
+   * are: "keep" leaves them in the old unit (written onto the logs that followed the exercise),
+   * "relabel" says they were in the new unit all along (also fixes an earlier wrong choice).
+   * Nothing is converted. Re-imported sheet rows follow the same choice (Exercise.withUnit).
+   */
+  async setUnit(dayId: string, exerciseId: string, unit: LoadUnit, past: PastUnits): Promise<void> {
+    const day = await this.repos.days.get(dayId);
+    const exercise = day?.exercise(exerciseId);
+    if (!day || !exercise || exercise.unit === unit) return;
+    const old = exercise.unit;
+    const changed = (await this.repos.sessions.forWorkoutDay(dayId)).flatMap((s) => {
+      const log = s.log(exerciseId);
+      if (!log || log.topWeight() === null) return [];
+      if (past === "keep") return log.unit ? [] : [s.withLog(log.withUnit(old))];
+      return log.unitOr(old) === old ? [s.withLog(log.withUnit(unit))] : [];
+    });
+    await this.repos.sessions.saveMany(changed);
+    await this.repos.days.save(day.withExercise(exercise.withUnit(unit, past)));
+  }
+
+  /**
    * Folds `fromId` into `intoId` on a day (e.g. three spellings of leg press into one): every
    * session's log moves over (combined when both were logged that day) and `fromId` goes away.
+   * Moved logs keep their unit; a day logged in both units is combined in pounds.
    */
   async mergeExercise(dayId: string, fromId: string, intoId: string): Promise<void> {
     const day = await this.repos.days.get(dayId);
-    if (!day || fromId === intoId || !day.exercise(fromId) || !day.exercise(intoId)) return;
+    const from = day?.exercise(fromId);
+    const into = day?.exercise(intoId);
+    if (!day || !from || !into || fromId === intoId) return;
+    const units = { from: from.unit, into: into.unit };
     const affected = (await this.repos.sessions.forWorkoutDay(dayId)).filter((s) => s.log(fromId));
-    await this.repos.sessions.saveMany(affected.map((s) => s.mergeLogs(fromId, intoId)));
+    await this.repos.sessions.saveMany(affected.map((s) => s.mergeLogs(fromId, intoId, units)));
     await this.repos.days.save(day.mergeExercise(fromId, intoId));
   }
 
@@ -80,12 +122,40 @@ export class SetupService {
     const day = await this.repos.days.get(dayId);
     if (!day?.exercise(exerciseId)) return;
     const affected = (await this.repos.sessions.forWorkoutDay(dayId)).filter((s) => s.log(exerciseId));
-    await this.repos.sessions.saveMany(
-      affected.map((s) => {
-        const without = s.withoutLog(exerciseId);
-        return without.hasContent() ? without : without.markDeleted();
-      }),
-    );
+    await this.repos.sessions.saveMany(affected.map((s) => SetupService.keepIfAny(s.withoutLog(exerciseId))));
     await this.repos.days.save(day.removeExercise(exerciseId));
+  }
+
+  /**
+   * Files logs that synced in for exercises merged or deleted on another device (saved there
+   * before it heard): into the exercise they were merged into, or dropped with the exercise.
+   * Safe to run any time and as often as you like; returns how many sessions it fixed.
+   */
+  async reconcile(): Promise<number> {
+    const days = (await this.repos.days.all()).filter((d) => d.retiredExercises().length > 0);
+    if (!days.length) return 0;
+    const sessions = await this.repos.sessions.all();
+    const fixed: Session[] = [];
+    for (const day of days) {
+      for (const session of sessions.filter((s) => s.workoutDayId === day.id)) {
+        let next = session;
+        for (const log of session.logs) {
+          const fate = day.retiredFate(log.exerciseId);
+          if (!fate) continue;
+          next =
+            fate.kind === "drop"
+              ? next.withoutLog(log.exerciseId)
+              : next.mergeLogs(log.exerciseId, fate.into.id, { from: fate.unit, into: fate.into.unit });
+        }
+        if (next !== session) fixed.push(SetupService.keepIfAny(next));
+      }
+    }
+    await this.repos.sessions.saveMany(fixed);
+    return fixed.length;
+  }
+
+  /** A session that lost its last log is deleted rather than kept empty. */
+  private static keepIfAny(session: Session): Session {
+    return session.hasContent() ? session : session.markDeleted();
   }
 }

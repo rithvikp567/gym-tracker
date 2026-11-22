@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { dayStatus } from "../src/domain/DayStatus";
 import { Exercise } from "../src/domain/Exercise";
 import { ExerciseLog } from "../src/domain/ExerciseLog";
-import { formatLoad, platesToPounds } from "../src/domain/Load";
+import { convertLoad, formatLoad, platesToPounds } from "../src/domain/Load";
 import { LocalDate } from "../src/domain/LocalDate";
 import { Session } from "../src/domain/Session";
 import { SetEntry } from "../src/domain/SetEntry";
@@ -66,6 +66,26 @@ describe("Plates", () => {
     expect(formatLoad(2.5, "plates")).toBe("2.5 pl");
     expect(formatLoad(185, "lb")).toBe("185");
   });
+
+  it("scales each half on its own plate, so more plates always weigh more", () => {
+    expect(platesToPounds(1.75)).toBe(160); // halfway from 1.5 (140) to 2 (180)
+    expect(platesToPounds(1.95)).toBe(176);
+    expect(platesToPounds(2)).toBe(180);
+    expect(platesToPounds(2.75)).toBe(250); // halfway from 2.5 (230) to 3 (270)
+    expect(platesToPounds(2.95)).toBe(266);
+    expect(platesToPounds(1.25)).toBe(115); // halfway from 1 (90) to 1.5 (140)
+    expect(platesToPounds(0.07)).toBe(7); // no float noise in stored conversions
+    for (let p = 0; p < 5; p = Math.round((p + 0.05) * 100) / 100) {
+      expect(platesToPounds(p + 0.05)).toBeGreaterThan(platesToPounds(p));
+    }
+  });
+
+  it("converts between units only when it's exact", () => {
+    expect(convertLoad(2.5, "plates", "lb")).toBe(230);
+    expect(convertLoad(185, "lb", "lb")).toBe(185);
+    expect(convertLoad(2.5, "plates", "plates")).toBe(2.5);
+    expect(convertLoad(230, "lb", "plates")).toBeNull(); // which plates? not guessed
+  });
 });
 
 describe("ExerciseLog", () => {
@@ -93,6 +113,46 @@ describe("ExerciseLog", () => {
     expect(merged.repsLabel()).toBe("8/6");
     expect(merged.note).toBe("felt good\nnew machine");
     expect(b.withExerciseId("z").exerciseId).toBe("z");
+
+    // A recorded Done survives, whichever side it's on.
+    const skipped = ExerciseLog.empty("walk").withDone(false);
+    const done = ExerciseLog.empty("cardio").withDone(true);
+    expect(skipped.mergedWith(done).done).toBe(true);
+    expect(done.mergedWith(skipped).done).toBe(true);
+    expect(skipped.mergedWith(ExerciseLog.empty("x")).done).toBe(false);
+    expect(ExerciseLog.empty("x").mergedWith(skipped).done).toBe(false);
+  });
+
+  it("keeps the unit its weights were saved in", () => {
+    const pounds = log([[360, 10]]).withUnit("lb");
+    expect(pounds.unit).toBe("lb");
+    // The exercise's unit only covers logs saved without one.
+    expect(pounds.weightLabel("plates")).toBe("360");
+    expect(pounds.summary(" – ", "plates")).toBe("360 – 10");
+    expect(log([[4, 8]]).weightLabel("plates")).toBe("4 pl");
+    expect(pounds.unitOr("plates")).toBe("lb");
+    expect(log([[4, 8]]).unitOr("plates")).toBe("plates");
+    // Survives every edit, and storage.
+    const edited = pounds.withSets([new SetEntry(365, 9)]).withNote("deep").withDone(null).withExerciseId("y");
+    expect(edited.unit).toBe("lb");
+    expect(ExerciseLog.from(edited.toJSON()).unit).toBe("lb");
+    expect(JSON.parse(JSON.stringify(pounds.toJSON()))).toMatchObject({ unit: "lb" });
+    // Logs saved before units were stored read as before and stay that way.
+    expect(log([[100, 5]]).toJSON()).not.toHaveProperty("unit");
+    expect(ExerciseLog.from({ exerciseId: "x", sets: [{ weight: 2.5, reps: 8 }], done: null, note: "" }).unit).toBeUndefined();
+  });
+
+  it("combines logs in different units in pounds", () => {
+    const plates = log([[2.5, 10], [null, 12]]).withUnit("plates");
+    const pounds = ExerciseLog.empty("y").withSets([new SetEntry(310, 8)]).withUnit("lb");
+    const merged = plates.mergedWith(pounds);
+    expect(merged.unit).toBe("lb");
+    expect(merged.sets.map((s) => s.weight)).toEqual([230, null, 310]); // 2.5 pl = 230 lb; bodyweight stays
+    // A log saved without a unit counts as the exercise's.
+    const legacy = log([[2.5, 10]]);
+    expect(legacy.mergedWith(pounds, "plates").sets.map((s) => s.weight)).toEqual([230, 310]);
+    expect(legacy.mergedWith(pounds, "lb").sets.map((s) => s.weight)).toEqual([2.5, 310]);
+    expect(legacy.mergedWith(log([[3, 8]]), "plates").unit).toBeUndefined(); // same unit: nothing to convert
   });
 
   it("uses the heaviest set for progress", () => {
@@ -144,14 +204,91 @@ describe("Merging and removing exercises", () => {
 
   it("moves a session's log to the merged exercise", () => {
     const date = LocalDate.parse("2026-11-17");
+    const lbs = { from: "lb", into: "lb" } as const;
     const only = Session.start("day", date).withLog(ExerciseLog.empty("old").withSets([new SetEntry(2, 8)]));
-    expect(only.mergeLogs("old", "new").logs.map((l) => l.exerciseId)).toEqual(["new"]);
+    expect(only.mergeLogs("old", "new", lbs).logs.map((l) => l.exerciseId)).toEqual(["new"]);
 
     const both = only.withLog(ExerciseLog.empty("new").withSets([new SetEntry(270, 10)]));
-    const merged = both.mergeLogs("old", "new");
+    const merged = both.mergeLogs("old", "new", lbs);
     expect(merged.logs).toHaveLength(1);
     expect(merged.log("new")?.repsLabel()).toBe("10/8");
     expect(both.withoutLog("old").logs.map((l) => l.exerciseId)).toEqual(["new"]);
+  });
+
+  it("keeps each moved log's unit, and combines a day in two units in pounds", () => {
+    const date = LocalDate.parse("2026-11-17");
+    const pounds = Session.start("day", date).withLog(ExerciseLog.empty("old").withSets([new SetEntry(300, 10)]));
+    // "old" was logged in pounds; the target is a plates exercise: the moved log says so.
+    const moved = pounds.mergeLogs("old", "new", { from: "lb", into: "plates" }).log("new")!;
+    expect(moved.unit).toBe("lb");
+    expect(moved.weightLabel("plates")).toBe("300");
+
+    const both = pounds.withLog(ExerciseLog.empty("new").withSets([new SetEntry(2.5, 8)]));
+    const combined = both.mergeLogs("old", "new", { from: "lb", into: "plates" }).log("new")!;
+    expect(combined.unit).toBe("lb");
+    expect(combined.summary()).toBe("230/300 · 8/10");
+  });
+
+  it("remembers merged and deleted exercises apart from the list", () => {
+    let day = WorkoutDay.create("Lower", 0).addExercise("Leg Press").addExercise("Legpress").addExercise("Squat").addExercise("Hack");
+    const [press, oldPress, squat, hack] = day.allExercises();
+    day = day.withExercise(oldPress!.with({ unit: "plates" }));
+    day = day.mergeExercise(oldPress!.id, press!.id).removeExercise(hack!.id);
+    expect(day.allExercises().map((e) => e.name)).toEqual(["Leg Press", "Squat"]);
+    expect(day.retiredExercises()).toEqual([{ id: oldPress!.id, mergedInto: press!.id, unit: "plates" }, { id: hack!.id }]);
+    expect(day.retiredFate(oldPress!.id)).toEqual({ kind: "merge", into: day.exercise(press!.id), unit: "plates" });
+    expect(day.retiredFate(hack!.id)).toEqual({ kind: "drop" });
+    expect(day.retiredFate(squat!.id)).toBeUndefined(); // still on the day
+    expect(day.retiredFate("never-heard-of-it")).toBeUndefined();
+    // Survives storage, and a stale edit can't bring a merged exercise back.
+    expect(WorkoutDay.from(day.toJSON()).retiredExercises()).toEqual(day.retiredExercises());
+    expect(day.withExercise(oldPress!.with({ targetSets: 3 }))).toBe(day);
+    expect(day.removeExercise("never-heard-of-it")).toBe(day);
+  });
+
+  it("follows merges of merges, and stops at deletes and loops", () => {
+    let day = WorkoutDay.create("Lower", 0).addExercise("A").addExercise("B").addExercise("C");
+    const [a, b, c] = day.allExercises();
+    day = day.mergeExercise(a!.id, b!.id).mergeExercise(b!.id, c!.id);
+    expect(day.retiredFate(a!.id)).toEqual({ kind: "merge", into: day.exercise(c!.id), unit: "lb" });
+    expect(day.removeExercise(c!.id).retiredFate(a!.id)).toEqual({ kind: "drop" });
+    // Two merges that point at each other (only possible in hand-made data) have no answer.
+    const loop = WorkoutDay.from({
+      ...WorkoutDay.create("Loop", 0).toJSON(),
+      retired: [{ id: "x", mergedInto: "y" }, { id: "y", mergedInto: "x" }],
+    });
+    expect(loop.retiredFate("x")).toBeUndefined();
+    // Merged into something that's gone without a trace: leave it be.
+    const lost = WorkoutDay.from({ ...WorkoutDay.create("Lost", 0).toJSON(), retired: [{ id: "x", mergedInto: "gone" }] });
+    expect(lost.retiredFate("x")).toBeUndefined();
+  });
+
+  it("lands a merged exercise's sheet names in the unit it was logged in", () => {
+    const plates = Exercise.create("Leg Press (Plates)").with({ unit: "plates" });
+    const pounds = Exercise.create("Legpress").renamed("Leg press machine");
+    const merged = plates.withNamesOf(pounds);
+    expect(merged.aliases).toEqual(["legpressmachine", "legpress"]);
+    expect(merged.unitOf("legpress")).toBe("lb");
+    expect(merged.unitOf("legpressmachine")).toBe("lb");
+    expect(merged.unitOf(merged.key)).toBe("plates");
+    expect(Exercise.from(merged.toJSON()).unitOf("legpress")).toBe("lb");
+  });
+});
+
+describe("Switching an exercise's unit", () => {
+  it("keeps the names logged so far in the old unit, or relabels them", () => {
+    const ex = Exercise.create("Leg press").renamed("Leg press machine");
+    const kept = ex.withUnit("plates", "keep");
+    expect(kept.unit).toBe("plates");
+    expect(kept.unitOf(kept.key)).toBe("lb");
+    expect(kept.unitOf("legpress")).toBe("lb");
+    const relabeled = ex.withUnit("plates", "relabel");
+    expect(relabeled.unitOf(relabeled.key)).toBe("plates");
+    expect(relabeled.toJSON()).not.toHaveProperty("keyUnits");
+    // Switching back after "keep": everything is in pounds again, nothing left to pin.
+    expect(kept.withUnit("lb", "keep").toJSON()).not.toHaveProperty("keyUnits");
+    expect(kept.withUnit("lb", "relabel").unitOf(kept.key)).toBe("lb");
+    expect(ex.withUnit("lb", "keep")).toBe(ex);
   });
 });
 
