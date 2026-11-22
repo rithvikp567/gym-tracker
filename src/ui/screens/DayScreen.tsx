@@ -4,7 +4,7 @@ import { BackButton } from "../components/controls";
 import { Icon } from "../components/Icon";
 import { WorkoutRows } from "../components/WorkoutRows";
 import { navigate } from "../router";
-import { useLive, useServices } from "../ServicesContext";
+import { useLiveState, useServices } from "../ServicesContext";
 import { useSlide } from "../slide";
 import { rememberHomeDay } from "../homePick";
 import { useDayStep } from "../hooks/useDayStep";
@@ -21,8 +21,9 @@ export function DayScreen({ date: iso }: { date: string }) {
   const slide = useSlide(`day/${iso}`);
   const stepDay = useDayStep(date, null);
 
-  const days = useLive(() => setup.days(), [], "days");
-  const data = useLive(
+  const daysLive = useLiveState(() => setup.days(), [], "days");
+  const days = daysLive.value;
+  const live = useLiveState(
     async () => {
       const [range, lastDone] = await Promise.all([calendar.range(date, date), sessions.lastWorkoutDates(today)]);
       return { info: range[0]!, lastDone };
@@ -30,20 +31,26 @@ export function DayScreen({ date: iso }: { date: string }) {
     [date.toString(), today.toString()],
     "day",
   );
+  const data = live.value;
 
   const logged = data?.info.sessions.filter((s) => s.hasContent()).length ?? 0;
   const plannedName = days?.find((d) => d.id === data?.info.plannedDayId)?.name;
-  const title = !data || !days ? "\u00a0" : logged > 0 ? "Workouts" : plannedName ? "Pick a workout" : "Rest day";
+  // "Rest day" and "Pick a workout" say nothing was logged: only from fresh data, as a copy from
+  // before you logged a workout here would say so by mistake. Until then they stay blank.
+  const fresh = daysLive.fresh && live.fresh;
+  const title = !data || !days ? "\u00a0" : logged > 0 ? "Workouts" : !fresh ? "\u00a0" : plannedName ? "Pick a workout" : "Rest day";
   const note =
     logged > 1
       ? `${logged} workouts logged`
       : logged === 1
         ? "1 workout logged"
-        : plannedName
-          ? `${plannedName} is planned`
-          : date.isAfter(today)
-            ? "Nothing planned"
-            : "Nothing planned · log a workout?";
+        : !fresh
+          ? "\u00a0"
+          : plannedName
+            ? `${plannedName} is planned`
+            : date.isAfter(today)
+              ? "Nothing planned"
+              : "Nothing planned · log a workout?";
 
   return (
     <div className="session-screen page-fill">

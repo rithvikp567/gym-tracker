@@ -3,7 +3,7 @@ import { RANGES, type ProgressLine, type RangeKey } from "../../../services/Prog
 import { ScreenHead, Segmented } from "../../components/controls";
 import { useViewState } from "../../hooks/useViewState";
 import { href, navigate } from "../../router";
-import { useLive, useServices, useSettings } from "../../ServicesContext";
+import { useLiveState, useServices, useSettings } from "../../ServicesContext";
 import { WeightChart } from "./WeightChart";
 
 const SERIES = 8;
@@ -18,13 +18,15 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
   const { theme } = useSettings();
   const [range, setRange] = useViewState<RangeKey>("progress.range", () => "6M", "device");
   const [lastDayId, setLastDayId] = useViewState<string | null>("progress.day", () => null, "device");
-  const days = useLive(() => setup.days(), [], "days");
+  const daysLive = useLiveState(() => setup.days(), [], "days");
+  const days = daysLive.value;
   // The Progress tab links to #/progress with no day: use the one picked last time.
   const day = days?.find((d) => d.id === (routeDayId ?? lastDayId)) ?? days?.[0];
   useEffect(() => {
     if (day && day.id !== lastDayId) setLastDayId(day.id);
   }, [day, lastDayId, setLastDayId]);
-  const data = useLive(() => (day ? progress.lines(day.id, range) : Promise.resolve(null)), [day?.id ?? null, range], "progress");
+  const live = useLiveState(() => (day ? progress.lines(day.id, range) : Promise.resolve(null)), [day?.id ?? null, range], "progress");
+  const data = live.value;
 
   // Color follows the exercise (its slot on the day), never its position among visible lines.
   const colors = useMemo(() => {
@@ -45,7 +47,8 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
   const hidden = useMemo(() => new Set(hiddenIds), [hiddenIds]);
   const setHidden = (next: Set<string>) => setHiddenIds([...next]);
 
-  if (!days) return <div className="loading">Loading…</div>;
+  // "No days" and "nothing logged" only from fresh data: an older copy would say so by mistake.
+  if (!days || (!day && !daysLive.fresh)) return <div className="loading">Loading…</div>;
   if (!day) {
     return (
       <>
@@ -85,7 +88,7 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
         <Segmented label="Time range" options={RANGES} value={range} onChange={setRange} />
       </div>
 
-      {data && lines.length === 0 && (
+      {data && lines.length === 0 && live.fresh && (
         <div className="empty">
           <p>No weights logged for {day.name} in this range.</p>
         </div>

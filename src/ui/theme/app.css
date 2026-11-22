@@ -565,11 +565,30 @@ a.list-row:hover {
   color: var(--accent);
 }
 
+/* "Dec 28, 2026 – Jan 3, 2027" and "| Week 53" never break inside: if the line can't fit
+   beside the arrows and the Today link on a phone, only the week number moves down. */
+.home-head .sub > span {
+  white-space: nowrap;
+}
+
 .home-head-side {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
+}
+
+/* Sync is set up but has nothing to say yet: keep the chip's space so the header doesn't grow when it appears. */
+.home-head-side .chip.is-placeholder {
+  visibility: hidden;
+}
+
+/* Rows still showing the last week on screen while the picked one loads: aria-busy at once,
+   data-stale (set by WorkoutRows after 150 ms) dims them, so fast loads never flicker. Not an
+   animation: Reduce Motion turns those off, and only the fade should go then, not the dimming. */
+.home .list[data-stale] {
+  opacity: 0.45;
+  transition: opacity 0.2s ease-out;
 }
 
 .week-nav {
@@ -698,6 +717,11 @@ a.list-row:hover {
 .session-foot {
   margin-top: 28px;
   text-align: center;
+}
+
+/* Nothing logged yet: the footer keeps its space, so the centered list doesn't jump when it appears. */
+.session-foot.is-hidden {
+  visibility: hidden;
 }
 
 .date-picker {

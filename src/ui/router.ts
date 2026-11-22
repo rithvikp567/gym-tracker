@@ -105,18 +105,29 @@ export function startHistory(): void {
   depth = known ?? 0;
   if (known === undefined) stamp(depth);
   window.addEventListener("scroll", () => scrollByDepth.set(depth, window.scrollY), { passive: true });
+  // Added before the first render, so it runs before `useRoute` shows the new screen.
+  window.addEventListener("hashchange", onHashChange);
 }
 
-/** Updates the bookkeeping for a hash change and decides where the new screen scrolls to. */
+/**
+ * Updates the bookkeeping for a hash change and decides where the new screen scrolls to.
+ * Saved positions only come from scroll events, and scrolling a page that is already at the
+ * top fires none, so positions of screens that are gone are dropped here, never left to be
+ * overwritten.
+ */
 function onHashChange(): void {
   const known = stampedDepth();
   if (replacing) {
+    // Another screen in the same entry: it starts at the top, and so does its saved position.
     stamp(depth);
+    scrollByDepth.set(depth, 0);
     pendingScroll = 0;
   } else if (known === undefined) {
-    // A link or `location.hash = …`: a new entry after the current one.
+    // A link or `location.hash = …`: a new entry after the current one. The browser has dropped
+    // the entries that were after it (Forward is gone), so forget their positions too.
     depth += 1;
     stamp(depth);
+    for (const d of [...scrollByDepth.keys()]) if (d >= depth) scrollByDepth.delete(d);
     pendingScroll = 0;
   } else {
     // Back or forward to an entry visited before: restore where it was scrolled to.
@@ -178,13 +189,11 @@ export function applyPendingScroll(): void {
   requestAnimationFrame(retry);
 }
 
+/** The current route; the history bookkeeping for each change runs first (see `startHistory`). */
 export function useRoute(): Route {
   const [route, setRoute] = useState(() => parseHash(location.hash));
   useEffect(() => {
-    const onChange = () => {
-      onHashChange();
-      setRoute(parseHash(location.hash));
-    };
+    const onChange = () => setRoute(parseHash(location.hash));
     window.addEventListener("hashchange", onChange);
     return () => window.removeEventListener("hashchange", onChange);
   }, []);

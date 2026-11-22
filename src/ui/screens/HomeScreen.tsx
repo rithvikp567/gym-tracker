@@ -1,14 +1,14 @@
-import { useRef } from "react";
-import { LocalDate, MONTH_SHORT, WEEKDAY_LETTER } from "../../domain/LocalDate";
+import { useEffect, useRef } from "react";
+import { LocalDate, WEEKDAY_LETTER } from "../../domain/LocalDate";
 import type { CalendarDay } from "../../services/CalendarService";
 import { CenterBlock } from "../components/CenterBlock";
 import { Icon } from "../components/Icon";
 import { WorkoutRows } from "../components/WorkoutRows";
 import { useViewState } from "../hooks/useViewState";
 import { useSwipe } from "../hooks/useSwipe";
-import { HOME_PICK_KEY, homePick, type HomePick } from "../homePick";
+import { HOME_PICK_KEY, homePick, homeWeek, weekRangeLabel, type HomePick } from "../homePick";
 import { href } from "../router";
-import { useLive, useServices, useSyncStatus } from "../ServicesContext";
+import { prefetchLive, useLive, useLiveState, useServices, useSyncStatus } from "../ServicesContext";
 
 /** "Upper 1" → "U1", "Abs/Cardio" → "AC", "Lower" → "Lower". */
 function shortName(name: string): string {
@@ -26,7 +26,8 @@ function weekTitle(offset: number): string {
 }
 
 export function HomeScreen() {
-  const { setup, calendar, sessions } = useServices();
+  const services = useServices();
+  const { setup, calendar, sessions } = services;
   const today = calendar.today();
   const [pick, setPick] = useViewState<HomePick | null>(HOME_PICK_KEY, () => null);
   const picked = (pick && pick.on === today.toString() ? LocalDate.tryParse(pick.date) : null) ?? today;
@@ -34,33 +35,47 @@ export function HomeScreen() {
   const offset = today.startOfWeek().daysUntil(weekStart) / 7;
   const choose = (date: LocalDate) => setPick(homePick(date, today));
 
-  const days = useLive(() => setup.days(), [], "days");
-  const data = useLive(
-    async () => {
-      const [week, lastDone] = await Promise.all([calendar.week(weekStart), sessions.lastWorkoutDates(today)]);
-      return { week, lastDone };
-    },
-    [weekStart.toString(), today.toString()],
-    "home",
-  );
+  const days = useLiveState(() => setup.days(), [], "days");
+  // Loaded on its own, so a week step reloads only the week.
+  const lastDone = useLive(() => sessions.lastWorkoutDates(today), [today.toString()], "lastDone");
+  const shown = homeWeek(calendar, weekStart, today);
+  const week = useLiveState(shown.load, shown.deps, shown.cacheAs);
+  // Plan labels and dots come only from this week's own data.
+  const thisWeek = week.value?.[0]?.date.equals(weekStart) ? week.value : undefined;
 
-  if (days && !days.length) return <FirstRun />;
-  if (!days || !data) return <div className="loading">Loading…</div>;
+  // With a week on screen, load the weeks either side, so a step there draws at once.
+  useEffect(() => {
+    if (!thisWeek) return;
+    for (const start of [weekStart.addDays(-7), weekStart.addDays(7)]) {
+      const next = homeWeek(calendar, start, today);
+      void prefetchLive(services, next.cacheAs, next.deps, next.load);
+    }
+    // Runs for each week that lands (and each reload after a change); the rest follows from it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thisWeek]);
 
-  const weekEnd = weekStart.addDays(6);
-  const pickedDay = data.week.find((d) => d.date.equals(picked)) ?? data.week[0]!;
-  const dayName = (id: string | null) => days.find((d) => d.id === id)?.name ?? "";
-  const otherYear = weekStart.year !== today.year ? `, ${weekStart.year}` : "";
+  // Only the very first time, before anything is cached. A week step never ends up here.
+  if (!days.value) return <div className="loading">Loading…</div>;
+  // Only from fresh data: a copy from before you set up your days would still say there are none.
+  if (!days.value.length && days.fresh) return <FirstRun />;
+
+  const workoutDays = days.value;
+  const dayName = (id: string | null) => workoutDays.find((d) => d.id === id)?.name ?? "";
+  // The header and strip come from the dates alone (D26), so nothing waits for the week to load.
+  const dates = Array.from({ length: 7 }, (_, i) => weekStart.addDays(i));
+  // The rows keep the week last on screen (even one that came from the cache) until this one
+  // lands. A week step keeps the weekday, so the plan still matches; the checks catch up when
+  // the week arrives.
+  const rowsDay = (thisWeek ?? week.previous)?.find((d) => d.date.weekday() === picked.weekday());
 
   return (
     <div className="home page-fill">
       <header className="screen-head home-head">
         <div>
           <h1>{weekTitle(offset)}</h1>
+          {/* If it can't fit on one line (a New Year week beside the Today link), only the week number wraps. */}
           <div className="sub num">
-            {MONTH_SHORT[weekStart.month - 1]} {weekStart.day} – {weekEnd.month !== weekStart.month ? `${MONTH_SHORT[weekEnd.month - 1]} ` : ""}
-            {weekEnd.day}
-            {otherYear} | Week {weekStart.isoWeek()}
+            <span>{weekRangeLabel(weekStart, today)}</span> <span>| Week {weekStart.isoWeek()}</span>
           </div>
         </div>
         <div className="home-head-side">
@@ -82,9 +97,10 @@ export function HomeScreen() {
       </header>
 
       <WeekStrip
-        week={data.week}
+        dates={dates}
+        week={thisWeek}
         today={today}
-        picked={pickedDay.date}
+        picked={picked}
         dayName={dayName}
         onPick={choose}
         onPrevWeek={() => choose(picked.addDays(-7))}
@@ -93,12 +109,19 @@ export function HomeScreen() {
 
       <CenterBlock>
         <div className="section-title centered">
-          <span>{pickedDay.date.equals(today) ? "Today" : pickedDay.date.label()}</span>
+          <span>{picked.equals(today) ? "Today" : picked.label()}</span>
           <a className="link" href={href({ name: "setup" })}>
             Edit days
           </a>
         </div>
-        <WorkoutRows days={days} date={pickedDay.date} plannedDayId={pickedDay.plannedDayId} sessions={pickedDay.sessions} lastDone={data.lastDone} />
+        <WorkoutRows
+          days={workoutDays}
+          date={picked}
+          plannedDayId={rowsDay?.plannedDayId ?? null}
+          sessions={rowsDay?.sessions ?? []}
+          lastDone={lastDone}
+          busy={!thisWeek || !lastDone}
+        />
       </CenterBlock>
     </div>
   );
@@ -106,6 +129,7 @@ export function HomeScreen() {
 
 /** Mon–Sun with the planned workout and a green/red dot. Swipe sideways for another week. */
 function WeekStrip({
+  dates,
   week,
   today,
   picked,
@@ -114,7 +138,10 @@ function WeekStrip({
   onPrevWeek,
   onNextWeek,
 }: {
-  week: CalendarDay[];
+  /** The 7 dates, Monday first. */
+  dates: readonly LocalDate[];
+  /** The same week's plan and dots; undefined while it loads (the dates still show). */
+  week: readonly CalendarDay[] | undefined;
   today: LocalDate;
   picked: LocalDate;
   dayName: (id: string | null) => string;
@@ -125,26 +152,36 @@ function WeekStrip({
   const strip = useRef<HTMLDivElement>(null);
   useSwipe(strip, { onSwipeRight: onPrevWeek, onSwipeLeft: onNextWeek });
   return (
-    <div className="week-strip" role="group" aria-label="Pick a day" ref={strip}>
-      {week.map((d) => (
-        <button
-          key={d.date.toString()}
-          type="button"
-          className={`week-day${d.date.equals(today) ? " today" : ""}`}
-          aria-pressed={d.date.equals(picked)}
-          aria-label={`${d.date.label()}${d.status === "done" ? ", worked out" : d.status === "missed" ? ", missed" : ""}`}
-          onClick={() => onPick(d.date)}
-        >
-          <span className="wd">{WEEKDAY_LETTER[d.date.weekday()]}</span>
-          <span className="dn num">{d.date.day}</span>
-          <span className="plan">{d.plannedDayId ? shortName(dayName(d.plannedDayId)) : ""}</span>
-          <span className="dot-slot">{(d.status === "done" || d.status === "missed") && <span className={`dot ${d.status}`} />}</span>
-        </button>
-      ))}
+    <div className="week-strip" role="group" aria-label="Pick a day" aria-busy={week ? undefined : true} ref={strip}>
+      {dates.map((date, i) => {
+        const d = week?.find((x) => x.date.equals(date));
+        const status = d?.status;
+        return (
+          // Keyed by weekday: a week step updates the same 7 buttons instead of replacing them.
+          <button
+            key={i}
+            type="button"
+            className={`week-day${date.equals(today) ? " today" : ""}`}
+            aria-pressed={date.equals(picked)}
+            aria-label={`${date.label()}${status === "done" ? ", worked out" : status === "missed" ? ", missed" : ""}`}
+            onClick={() => onPick(date)}
+          >
+            <span className="wd">{WEEKDAY_LETTER[date.weekday()]}</span>
+            <span className="dn num">{date.day}</span>
+            <span className="plan">{d?.plannedDayId ? shortName(dayName(d.plannedDayId)) : ""}</span>
+            <span className="dot-slot">{(status === "done" || status === "missed") && <span className={`dot ${status}`} />}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
 
+/**
+ * Sync status (or "Demo data") above the week arrows. When sync is set up, its slot is kept even
+ * while there's nothing to say yet (sign-in finishes after Home draws, sometimes after a token
+ * refresh), so the chip appearing never makes the header taller and moves the strip.
+ */
 function SyncChip() {
   const { mode } = useServices();
   const status = useSyncStatus();
@@ -158,12 +195,13 @@ function SyncChip() {
     error: "Sync error",
   };
   const label = text[status.state];
-  return label ? (
+  if (!label) return status.state === "off" ? null : <span className="chip is-placeholder" aria-hidden>{"\u00a0"}</span>;
+  return (
     <a className="chip" href={href({ name: "settings" })}>
       <span className={`dot ${status.state === "error" ? "missed" : status.state === "idle" ? "done" : ""}`} />
       {label}
     </a>
-  ) : null;
+  );
 }
 
 function FirstRun() {
