@@ -272,13 +272,38 @@ describe("SettingsService", () => {
     settings.onLocalChange(() => changes++);
     settings.update({ theme: "graphite" });
     expect(changes).toBe(1);
-    expect(settings.snapshot()).toEqual({ values: { theme: "graphite", showLastSession: true }, updatedAt: clock.now().toISOString() });
+    const now = clock.now().toISOString();
+    expect(settings.snapshot()).toEqual({
+      values: { theme: "graphite", showLastSession: true },
+      updatedAt: now,
+      stamps: { theme: now, showLastSession: EPOCH }, // only the setting that changed
+    });
+  });
+
+  it("never stamps a change earlier than the stamp it replaces", () => {
+    const settings = new SettingsService(memoryStore(), clock);
+    const ahead = new Date(clock.now().getTime() + 3_600_000); // copied from a device whose clock is an hour fast
+    settings.applyRemote({ values: { theme: "graphite" }, updatedAt: ahead.toISOString() });
+    settings.update({ theme: "oled" });
+    expect(settings.snapshot().stamps).toEqual({ theme: new Date(ahead.getTime() + 1).toISOString(), showLastSession: EPOCH });
   });
 
   it("dates choices saved before sync just after the epoch, so any real change wins", () => {
     const settings = new SettingsService(memoryStore({ theme: "graphite" }), clock);
     expect(settings.get().theme).toBe("graphite");
     expect(settings.snapshot().updatedAt).toBe("1970-01-01T00:00:00.001Z");
+  });
+
+  it("dates settings saved before per-setting stamps by their copy's time, and survives damaged times", () => {
+    const older = new SettingsService(memoryStore({ theme: "graphite", showLastSession: false, updatedAt: "2026-11-21T10:00:00Z" }), clock);
+    expect(older.snapshot().stamps).toEqual({ theme: "2026-11-21T10:00:00.000Z", showLastSession: "2026-11-21T10:00:00.000Z" });
+    // A setting missing from the saved copy (added in a later version) was never chosen here.
+    const missing = new SettingsService(memoryStore({ theme: "graphite", updatedAt: "2026-11-21T10:00:00.000Z" }), clock);
+    expect(missing.snapshot().stamps).toEqual({ theme: "2026-11-21T10:00:00.000Z", showLastSession: EPOCH });
+    const damaged = new SettingsService(memoryStore({ theme: "graphite", updatedAt: "soon", stamps: { theme: 42, showLastSession: "later" } }), clock);
+    expect(damaged.snapshot().updatedAt).toBe("1970-01-01T00:00:00.001Z");
+    damaged.update({ showLastSession: false });
+    expect(damaged.snapshot().stamps).toEqual({ theme: "1970-01-01T00:00:00.001Z", showLastSession: clock.now().toISOString() });
   });
 
   it("applies another device's copy without echoing it back, and ignores bad values", () => {
@@ -296,5 +321,18 @@ describe("SettingsService", () => {
     expect(new SettingsService(store, clock).snapshot().updatedAt).toBe("2026-11-21T10:00:00.000Z");
     settings.applyRemote({ values: { theme: "neon" }, updatedAt: "2026-11-21T11:00:00.000Z" });
     expect(settings.get().theme).toBe("oled");
+  });
+
+  it("keeps each setting's own stamp from another device's copy, across a restart", () => {
+    const store = memoryStore();
+    const settings = new SettingsService(store, clock);
+    const copy = {
+      values: { theme: "graphite", showLastSession: false },
+      updatedAt: "2026-11-21T12:00:00.000Z",
+      stamps: { theme: "2026-11-21T11:00:00.000Z", showLastSession: "2026-11-21T12:00:00.000Z" },
+    };
+    settings.applyRemote(copy);
+    expect(settings.snapshot()).toEqual(copy);
+    expect(new SettingsService(store, clock).snapshot()).toEqual(copy);
   });
 });
