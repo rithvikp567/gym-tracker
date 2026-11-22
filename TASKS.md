@@ -62,11 +62,11 @@ Status key: ⬜ not started · 🟨 in progress · ✅ done
 
 Checklist:
 
-- [ ] Create public repo `rithvikp567/gym-tracker` from the **personal** account
-- [ ] Repo-local git config uses the GitHub noreply email (same as Catan Pangea)
-- [ ] First push to `main`
-- [ ] Settings → Pages → Source: **GitHub Actions**
-- [ ] Settings → Secrets and variables → Actions → **Variables**: `SUPABASE_URL`, `SUPABASE_KEY` (after §3.2)
+- [x] Create public repo `rithvikp567/gym-tracker` from the **personal** account (2026-11-21)
+- [x] Repo-local git config uses the GitHub noreply email (`52207213+rithvikp567@users.noreply.github.com`)
+- [x] First push to `main`
+- [x] Settings → Pages → Source: **GitHub Actions** (set through the API)
+- [x] Settings → Secrets and variables → Actions → **Variables**: `SUPABASE_URL`, `SUPABASE_KEY`
 - [ ] Open the site on the phone → Add to Home Screen
 
 ### 3.2 Backend — Supabase (confirmed)
@@ -75,11 +75,11 @@ Why Supabase: relational data, built-in auth, row-level security, storage for ph
 
 Checklist:
 
-- [ ] Create project `gym-tracker` (free plan allows 2 active projects)
-- [ ] Run `supabase/migrations/0001_init.sql` in the SQL Editor
-- [ ] Sign In / Providers: **Confirm email** off (password sign-in, no emails; D15)
-- [ ] Keys into `.env.local` and GitHub Actions variables
-- [ ] Create your account in the app, then turn off new sign-ups
+- [x] Create project `gym-tracker` (free plan allows 2 active projects)
+- [x] Run `supabase/migrations/0001_init.sql` in the SQL Editor
+- [x] Sign In / Providers: **Confirm email** off (password sign-in, no emails; D15)
+- [x] Keys into `.env.local` and GitHub Actions variables
+- [x] Create your account in the app, then turn off new sign-ups
 
 Schema: tables `workout_days`, `sessions`, `splits`, each row = one app record as JSON (`data`) + `user_id`, `updated_at`, `deleted`, `server_updated_at`. A trigger keeps the newest copy when an offline device uploads an older one, and stamps server time for "what changed since". RLS: `auth.uid() = user_id`.
 
@@ -246,8 +246,8 @@ Real export result (2026-11-21): Upper 1 21 sessions, Lower 22, Upper 2 15, Abs/
 
 ## 8. Open questions
 
-- [ ] Lower on both Tue and Fri? The sheet has one Lower per week; the split above assumes both. Set it in the import preview or Settings → Workout days.
-- [ ] Rename "ABS/Cardio" from the sheet to "Abs/Cardio" after import? (Settings → Workout days.)
+- [ ] Lower on both Tue and Fri? The sheet has one Lower per week; the split above assumes both. Set it in the import preview or Settings → Workout Days.
+- [ ] Rename "ABS/Cardio" from the sheet to "Abs/Cardio" after import? (Settings → Workout Days.)
 
 ---
 
