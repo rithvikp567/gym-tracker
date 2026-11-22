@@ -26,6 +26,10 @@
   --accent-soft: rgba(198, 244, 50, 0.12);
   --chart-grid: #1f1f21;
   --chart-axis: #6f6f75;
+  --panel: #0c0c0d;
+  --tile: #161618;
+  --tile-line: #242427;
+  --accent-line: color-mix(in srgb, var(--accent) 35%, var(--tile-line));
 }
 
 :root[data-theme="graphite"] {
@@ -47,6 +51,10 @@
   --accent-soft: rgba(125, 183, 255, 0.14);
   --chart-grid: #2a2a2f;
   --chart-axis: #76767e;
+  --panel: #18181b;
+  --tile: #222226;
+  --tile-line: #313137;
+  --accent-line: color-mix(in srgb, var(--accent) 35%, var(--tile-line));
 }
 
 :root {
@@ -67,6 +75,14 @@
 
   --radius: 12px;
   --radius-sm: 8px;
+  /* Rounded tiles: a column is a panel (rail, main area); what sits in it is a tile. */
+  --panel-radius: 22px;
+  --tile-radius: 16px;
+  --tile-gap: 12px;
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 120ms;
+  --dur: 220ms;
   --gutter: 16px;
   --tabbar-h: 58px;
   --rail-w: 220px;
