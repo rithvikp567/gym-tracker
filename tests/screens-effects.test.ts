@@ -5,6 +5,7 @@ import type { AppServices } from "../src/app/AppServices";
 import { MemoryRecordStore } from "../src/data/MemoryRecordStore";
 import { NoSync } from "../src/data/NoSync";
 import { StoreRepositories } from "../src/data/StoreRepositories";
+import { Exercise } from "../src/domain/Exercise";
 import { ExerciseLog } from "../src/domain/ExerciseLog";
 import { LocalDate } from "../src/domain/LocalDate";
 import { SetEntry } from "../src/domain/SetEntry";
@@ -21,6 +22,7 @@ import { useSwipe } from "../src/ui/hooks/useSwipe";
 import { setViewState } from "../src/ui/hooks/useViewState";
 import { navigate } from "../src/ui/router";
 import { HomeScreen } from "../src/ui/screens/HomeScreen";
+import { ExerciseEditor } from "../src/ui/screens/session/ExerciseEditor";
 import { ServicesProvider } from "../src/ui/ServicesContext";
 import { slideNext } from "../src/ui/slide";
 
@@ -476,5 +478,50 @@ describe("swipe, mounted", () => {
     expect(el.listeners.map((l) => l.type).sort()).toEqual(["touchend", "touchstart"]);
     unmount();
     expect(el.listeners).toEqual([]);
+  });
+});
+
+describe("ExerciseEditor units, mounted", () => {
+  /** What typing into an input does: calls its React change handler with the new value. */
+  function type(el: FakeElement, value: string): void {
+    const props = Object.entries(el).find(([k]) => k.startsWith("__reactProps$"))![1] as { onChange: (e: unknown) => void };
+    act(() => props.onChange({ target: { value } }));
+  }
+  function field(host: FakeNode, label: string): FakeElement {
+    const [el] = findAll(host, (e) => e.getAttribute("aria-label") === label);
+    if (!el) throw new Error(`No field labelled ${label}`);
+    return el;
+  }
+  const platesPress = () => Exercise.create("Leg press").withUnit("plates", "relabel");
+  const lastSaved = (onSave: ReturnType<typeof vi.fn>) => onSave.mock.lastCall![0] as ExerciseLog;
+
+  it("logs a day that only has a note in the exercise's unit, whatever unit the note was saved in", async () => {
+    const press = platesPress();
+    const onSave = vi.fn();
+    const note = ExerciseLog.empty(press.id).withNote("seat 4").withUnit("lb"); // saved by an editor working in pounds
+    const host = mount(createElement(ExerciseEditor, { exercise: press, log: note, last: undefined, onSave }));
+    expect(field(host, "Set 1 weight").getAttribute("placeholder")).toBe("plates");
+    type(field(host, "Set 1 weight"), "2.5");
+    await settle(450);
+    const saved = lastSaved(onSave);
+    expect([saved.unit, saved.topWeight(), saved.note]).toEqual(["plates", 2.5, "seat 4"]);
+  });
+
+  it("keeps the unit it opened in when a weight is cleared mid-edit", async () => {
+    const press = platesPress();
+    const onSave = vi.fn();
+    const pounds = ExerciseLog.empty(press.id).withSets([new SetEntry(370, 10)]).withUnit("lb");
+    const props = { exercise: press, last: undefined, onSave };
+    const host = mount(createElement(ExerciseEditor, { ...props, log: pounds }));
+    type(field(host, "Set 1 weight"), "");
+    await settle(450);
+    const cleared = lastSaved(onSave);
+    expect([cleared.topWeight(), cleared.unit]).toEqual([null, undefined]);
+    // The session reloads with that copy; the editor stays in pounds.
+    rerender(createElement(ExerciseEditor, { ...props, log: cleared }));
+    expect(field(host, "Set 1 weight").getAttribute("placeholder")).toBe("lb");
+    type(field(host, "Set 1 weight"), "380");
+    await settle(450);
+    expect([lastSaved(onSave).unit, lastSaved(onSave).topWeight()]).toEqual(["lb", 380]);
   });
 });

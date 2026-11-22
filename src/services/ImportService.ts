@@ -66,13 +66,14 @@ export class ImportService {
       for (const [date, rows] of rowsByDate) {
         let session = Session.start(day.id, LocalDate.parse(date));
         for (const { exercise, row } of rows.sort((a, b) => a.exercise.rowOrder(a.row.key) - b.exercise.rowOrder(b.row.key))) {
+          // Rows in the unit its unmarked logs are in are saved without one; a row without weights
+          // (a note alone) never has one (ExerciseLog), so weights typed into it later follow the exercise.
           const unit = exercise.unitOf(row.key);
-          const log = ExerciseLog.from({ exerciseId: exercise.id, sets: row.sets, done: row.done, note: row.note });
-          // Only weights have a unit: a row without any (a note alone) follows the exercise, as
-          // Session.mergeLogs files it, so weights typed into it later are in the exercise's unit.
-          const incoming = log.withUnit(unit === exercise.unit || log.topWeight() === null ? undefined : unit);
+          const incoming = ExerciseLog.from({ exerciseId: exercise.id, sets: row.sets, done: row.done, note: row.note }).withUnit(
+            unit === exercise.bareUnit ? undefined : unit,
+          );
           const prev = session.log(exercise.id);
-          session = session.withLog(prev ? prev.mergedWith(incoming, exercise.unit) : incoming);
+          session = session.withLog(prev ? prev.mergedWith(incoming, exercise.bareUnit) : incoming);
         }
         if (session.hasContent()) sessions.push(session);
       }

@@ -322,6 +322,37 @@ describe("Switching an exercise's unit", () => {
     expect(kept.withUnit("lb", "relabel").unitOf(kept.key)).toBe("lb");
     expect(ex.withUnit("lb", "keep")).toBe(ex);
   });
+
+  it("remembers on the exercise what its logs saved without a unit are", () => {
+    const press = Exercise.create("Leg press");
+    expect([press.unit, press.bareUnit]).toEqual(["lb", "lb"]);
+    const kept = press.withUnit("plates", "keep");
+    expect([kept.unit, kept.bareUnit, kept.toJSON().bareUnit]).toEqual(["plates", "lb", "lb"]);
+    // Back to pounds either way: everything unmarked is pounds again, nothing stored.
+    expect(kept.withUnit("lb", "keep").toJSON()).not.toHaveProperty("bareUnit");
+    expect(kept.withUnit("lb", "relabel").toJSON()).not.toHaveProperty("bareUnit");
+    // "Those were plates": they were plates all along.
+    const relabeled = press.withUnit("plates", "relabel");
+    expect([relabeled.unit, relabeled.bareUnit]).toEqual(["plates", "plates"]);
+    expect(relabeled.toJSON()).not.toHaveProperty("bareUnit");
+    // A wrong "keep" fixed by switching back and answering "those were plates".
+    expect(kept.withUnit("lb", "relabel").withUnit("plates", "relabel").bareUnit).toBe("plates");
+    // A merged exercise's tombstone keeps the unit its unmarked logs are in.
+    const day = WorkoutDay.create("Lower", 0).withExercise(kept).addExercise("Sled");
+    const sled = day.activeExercises()[1]!;
+    expect(day.mergeExercise(kept.id, sled.id).retiredExercises()).toEqual([{ id: kept.id, mergedInto: sled.id, unit: "lb" }]);
+  });
+
+  it("never gives a log without weights a unit", () => {
+    const note = ExerciseLog.empty("x").withNote("seat 4").withUnit("lb");
+    expect(note.unit).toBeUndefined();
+    expect(note.toJSON()).not.toHaveProperty("unit");
+    const bodyweight = ExerciseLog.from({ exerciseId: "x", sets: [{ weight: null, reps: 10 }], done: null, note: "", unit: "plates" });
+    expect(bodyweight.unit).toBeUndefined();
+    const lifted = note.withSets([new SetEntry(2.5, 8)]).withUnit("plates");
+    expect(lifted.unit).toBe("plates");
+    expect(lifted.withSets([new SetEntry(null, 8)]).unit).toBeUndefined();
+  });
 });
 
 describe("Session", () => {

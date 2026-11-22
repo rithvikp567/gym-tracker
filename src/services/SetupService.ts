@@ -67,8 +67,8 @@ export class SetupService {
   }
 
   /**
-   * Sessions with weights logged for the exercise in `unit` (a log saved without a unit counts as
-   * the exercise's): what switching the exercise away from `unit` asks about.
+   * Sessions with weights logged for the exercise in `unit` (a log saved without a unit counts in
+   * the exercise's `bareUnit`): what switching the exercise away from `unit` asks about.
    */
   async sessionsLoggedIn(dayId: string, exerciseId: string, unit: LoadUnit): Promise<number> {
     const exercise = (await this.repos.days.get(dayId))?.exercise(exerciseId);
@@ -76,28 +76,31 @@ export class SetupService {
     const sessions = await this.repos.sessions.forWorkoutDay(dayId);
     return sessions.filter((s) => {
       const log = s.log(exerciseId);
-      return log !== undefined && log.topWeight() !== null && log.unitOr(exercise.unit) === unit;
+      return log !== undefined && log.topWeight() !== null && log.unitOr(exercise.bareUnit) === unit;
     }).length;
   }
 
   /**
    * Logs an exercise in `unit` from now on. `past` says what its weights saved in the old unit
-   * are: "keep" leaves them in the old unit (written onto the logs that followed the exercise),
-   * "relabel" says they were in the new unit all along (also fixes an earlier wrong choice).
-   * Nothing is converted. Re-imported sheet rows follow the same choice (Exercise.withUnit).
+   * are: "keep" leaves them in the old unit, "relabel" says they were in the new unit all along
+   * (also fixes an earlier wrong choice). Nothing is converted. Logs saved without a unit and
+   * re-imported sheet rows follow the choice through the exercise (Exercise.withUnit), which a
+   * session saved on a device that hasn't heard of the switch can't undo; "relabel" also relabels
+   * the logs saved with the old unit.
    */
   async setUnit(dayId: string, exerciseId: string, unit: LoadUnit, past: PastUnits): Promise<void> {
     const day = await this.repos.days.get(dayId);
     const exercise = day?.exercise(exerciseId);
     if (!day || !exercise || exercise.unit === unit) return;
     const old = exercise.unit;
-    const changed = (await this.repos.sessions.forWorkoutDay(dayId)).flatMap((s) => {
-      const log = s.log(exerciseId);
-      if (!log || log.topWeight() === null) return [];
-      if (past === "keep") return log.unit ? [] : [s.withLog(log.withUnit(old))];
-      return log.unitOr(old) === old ? [s.withLog(log.withUnit(unit))] : [];
-    });
-    await this.repos.sessions.saveMany(changed);
+    const relabeled =
+      past === "keep"
+        ? []
+        : (await this.repos.sessions.forWorkoutDay(dayId)).flatMap((s) => {
+            const log = s.log(exerciseId);
+            return log?.unit === old ? [s.withLog(log.withUnit(unit))] : [];
+          });
+    await this.repos.sessions.saveMany(relabeled);
     await this.repos.days.save(day.withExercise(exercise.withUnit(unit, past)));
   }
 
@@ -111,7 +114,7 @@ export class SetupService {
     const from = day?.exercise(fromId);
     const into = day?.exercise(intoId);
     if (!day || !from || !into || fromId === intoId) return;
-    const units = { from: from.unit, into: into.unit };
+    const units = { from: from.bareUnit, into: into.bareUnit };
     const affected = (await this.repos.sessions.forWorkoutDay(dayId)).filter((s) => s.log(fromId));
     await this.repos.sessions.saveMany(affected.map((s) => s.mergeLogs(fromId, intoId, units)));
     await this.repos.days.save(day.mergeExercise(fromId, intoId));
@@ -131,11 +134,22 @@ export class SetupService {
    * before it heard): into the exercise they were merged into, or dropped with the exercise.
    * Safe to run any time and as often as you like; returns how many sessions it fixed. Fixes are
    * dated just after the copy they fixed (saveRepairs), so they never beat a newer edit of that
-   * session still on its way from another device.
+   * session still on its way from another device. A session saved or synced in while a round
+   * ran is left alone by that round (saveRepairs) and repaired from its new copy by the next.
    */
   async reconcile(): Promise<number> {
+    let fixed = 0;
+    for (let round = 0; round < 3; round++) {
+      const { found, saved } = await this.reconcileOnce();
+      fixed += saved;
+      if (saved === found) break;
+    }
+    return fixed;
+  }
+
+  private async reconcileOnce(): Promise<{ found: number; saved: number }> {
     const days = (await this.repos.days.all()).filter((d) => d.retiredExercises().length > 0);
-    if (!days.length) return 0;
+    if (!days.length) return { found: 0, saved: 0 };
     const sessions = await this.repos.sessions.all();
     const fixed: Session[] = [];
     for (const day of days) {
@@ -147,13 +161,12 @@ export class SetupService {
           next =
             fate.kind === "drop"
               ? next.withoutLog(log.exerciseId)
-              : next.mergeLogs(log.exerciseId, fate.into.id, { from: fate.unit, into: fate.into.unit });
+              : next.mergeLogs(log.exerciseId, fate.into.id, { from: fate.unit, into: fate.into.bareUnit });
         }
         if (next !== session) fixed.push(SetupService.keepIfAny(next));
       }
     }
-    await this.repos.sessions.saveRepairs(fixed);
-    return fixed.length;
+    return { found: fixed.length, saved: await this.repos.sessions.saveRepairs(fixed) };
   }
 
   /** A session that lost its last log is deleted rather than kept empty. */

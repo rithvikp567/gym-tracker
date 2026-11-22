@@ -4,7 +4,7 @@ import { Emitter, type Unsubscribe } from "../lib/Emitter";
 import type { SyncController, SyncedPreferences, SyncStatus } from "../services/ports";
 import { readPreferences, reconcilePreferences } from "./preferenceSync";
 import { TABLES, type RecordStore, type TableName } from "./RecordStore";
-import { takesRemote } from "./recordSync";
+import { settle } from "./recordSync";
 
 interface RemoteRow {
   id: string;
@@ -31,7 +31,7 @@ const PREFS_FOCUS_MS = 15_000;
  *  push: upload every record in the outbox (upsert; the server keeps whichever copy has the
  *        newer `updated_at`, see supabase/migrations).
  *  pull: download rows changed since the last pull (by server time) and apply the ones newer
- *        than what's on this device (on a tie, the server's copy: see recordSync.takesRemote).
+ *        than what's on this device (a tie is settled by the copies themselves: recordSync.settle).
  *  prefs: keep the preferences (color style…) in step with the account's user metadata,
  *        setting by setting, newest change wins (TASKS.md D20). Re-read on app open, back in
  *        front, sign-in and the Sync button; on window focus at most every 15 s (without a
@@ -157,14 +157,18 @@ export class SupabaseSync implements SyncController {
       this.set({ state: "offline", message: "Offline. Changes are saved on this device and will sync later." });
       return;
     }
+    // Signing out (or in as someone else) while this runs makes its outcome moot: the sign-in
+    // change already set the status, so this sync leaves it alone.
+    const account = this.userId;
     this.set({ state: "syncing", message: null });
     try {
       await this.push();
       await this.pull();
       // Preferences are a nicety: a failure here never marks the whole sync as failed.
       await this.syncPreferences().catch((e: unknown) => console.warn("Preferences didn't sync", e));
-      this.set({ state: "idle", lastSyncedAt: new Date(), message: null });
+      if (this.userId === account) this.set({ state: "idle", lastSyncedAt: new Date(), message: null });
     } catch (e) {
+      if (this.userId !== account) return;
       const offline = !navigator.onLine || e instanceof TypeError;
       this.set({
         state: offline ? "offline" : "error",
@@ -273,18 +277,26 @@ export class SupabaseSync implements SyncController {
   }
 
   /**
-   * Keeps whichever copy was edited last; on a tie, the server's copy unless this device's own is
-   * still waiting to upload (takesRemote). Returns true if anything local changed.
+   * Keeps whichever copy was edited last; a tie is settled by the copies themselves (settle), and
+   * a local copy that wins a tie goes up again on a sync right after this one. Returns true if
+   * anything local changed.
    */
   private async apply(table: TableName, rows: RemoteRow[]): Promise<boolean> {
     const waiting = new Set((await this.store.outbox()).filter((e) => e.table === table).map((e) => e.id));
     const taken: Syncable[] = [];
+    const again: Syncable[] = [];
     for (const row of rows) {
       const remote: Syncable = { ...row.data, id: row.id, updatedAt: new Date(row.updated_at).toISOString(), deleted: row.deleted };
       const local = await this.store.get(table, row.id);
-      if (takesRemote(remote, local, waiting.has(row.id))) taken.push(remote);
+      const outcome = settle(remote, local, waiting.has(row.id));
+      if (outcome === "take") taken.push(remote);
+      if (outcome === "push" && local) again.push(local);
     }
     if (taken.length) await this.store.putMany(table, taken, "remote");
+    if (again.length) {
+      await this.store.putMany(table, again, "local"); // queued with the same stamp
+      this.again = true;
+    }
     return taken.length > 0;
   }
 

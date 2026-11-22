@@ -23,6 +23,12 @@ export interface RecordStore {
   getAll<T extends Syncable>(table: TableName): Promise<T[]>;
   get<T extends Syncable>(table: TableName, id: string): Promise<T | undefined>;
   putMany<T extends Syncable>(table: TableName, records: T[], origin: Origin): Promise<void>;
+  /**
+   * Saves each record as a local change only if the stored copy still has the `updatedAt` it was
+   * made from (`basedOn`), checked and written in one transaction: a copy saved or synced in
+   * meanwhile is left alone. Returns the ids saved.
+   */
+  putIfUnchanged<T extends Syncable>(table: TableName, records: { record: T; basedOn: string }[]): Promise<string[]>;
   outbox(): Promise<OutboxEntry[]>;
   /** Removes entries that haven't changed since they were read (a newer edit stays queued). */
   clearOutbox(entries: OutboxEntry[]): Promise<void>;

@@ -15,8 +15,15 @@ export interface ExerciseData {
   targetText: string | null;
   /** Removed from the day but kept so its history and chart line survive. */
   archived: boolean;
-  /** Pounds (default) or plates per side. Missing in records saved before v0.3.0. */
+  /** Pounds (default) or plates per side: what new weights are logged in. Missing in records saved before v0.3.0. */
   unit?: LoadUnit;
+  /**
+   * The unit of weights in its logs saved without one (imported sheet rows, logs from before units
+   * were stored), when that isn't `unit`: switching units with "keep those" leaves them in the old
+   * unit. It lives on the exercise rather than on each log, so a session re-saved on a device that
+   * hadn't heard of the switch yet can't change what they mean. Missing = `unit`.
+   */
+  bareUnit?: LoadUnit;
   /**
    * Name keys this exercise also answers to: its names before a rename, and exercises merged
    * into it. Re-importing the sheet then lands old names on this exercise instead of
@@ -79,6 +86,8 @@ export class Exercise {
   get targetText(): string | null { return this.data.targetText; }
   get archived(): boolean { return this.data.archived; }
   get unit(): LoadUnit { return this.data.unit ?? "lb"; }
+  /** The unit of weights in its logs saved without one (see ExerciseData.bareUnit); pass it to `ExerciseLog.unitOr`. */
+  get bareUnit(): LoadUnit { return this.data.bareUnit ?? this.unit; }
   get aliases(): readonly string[] { return this.data.aliases ?? []; }
   get key(): string { return Exercise.keyOf(this.data.name); }
 
@@ -133,8 +142,9 @@ export class Exercise {
 
   /**
    * Logged in `unit` from now on. `past` says what the numbers under its names so far are:
-   * "keep" = still the old unit (pinned on its names, so a re-import reads the sheet as before),
-   * "relabel" = the new unit all along. Its saved logs change separately (SetupService.setUnit).
+   * "keep" = still the old unit (pinned on its names, so a re-import reads the sheet as before,
+   * and on its logs saved without a unit through `bareUnit`), "relabel" = the new unit all along.
+   * Logs saved with the old unit change separately (SetupService.setUnit).
    */
   withUnit(unit: LoadUnit, past: PastUnits): Exercise {
     const old = this.unit;
@@ -144,7 +154,9 @@ export class Exercise {
       const was = this.unitOf(key);
       keyUnits[key] = past === "relabel" && was === old ? unit : was;
     }
-    return new Exercise({ ...this.data, unit }).withKeyUnits(keyUnits);
+    const { bareUnit: _bare, ...rest } = this.data;
+    const bareUnit = past === "keep" ? this.bareUnit : unit;
+    return new Exercise(bareUnit === unit ? { ...rest, unit } : { ...rest, unit, bareUnit }).withKeyUnits(keyUnits);
   }
 
   /**

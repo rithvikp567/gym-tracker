@@ -10,22 +10,29 @@ export interface ExerciseLogData {
   note: string;
   /**
    * The unit the weights were saved in, so switching the exercise's unit later doesn't change
-   * what they mean. Missing on logs saved before units were stored and on imported sheet rows:
-   * those follow their exercise's unit.
+   * what they mean. Missing on logs saved before units were stored and on imported sheet rows in
+   * the exercise's usual unit: those are in `Exercise.bareUnit`. Never set on a log without
+   * weights (a note, bodyweight reps): only weights have a unit.
    */
   unit?: LoadUnit;
 }
 
 /** What you did for one exercise in one session. Immutable. */
 export class ExerciseLog {
+  /** The unit its weights were saved in; undefined = its exercise's (see ExerciseLogData). */
+  readonly unit: LoadUnit | undefined;
+
   private constructor(
     readonly exerciseId: string,
     readonly sets: readonly SetEntry[],
     readonly done: boolean | null,
     readonly note: string,
-    /** The unit its weights were saved in; undefined = its exercise's unit (see ExerciseLogData). */
-    readonly unit: LoadUnit | undefined,
-  ) {}
+    unit: LoadUnit | undefined,
+  ) {
+    // Only weights have a unit. A log without any follows its exercise, so weights typed into it
+    // later are in the exercise's current unit and no unit switch has to remember it.
+    this.unit = sets.some((s) => s.weight !== null) ? unit : undefined;
+  }
 
   static empty(exerciseId: string): ExerciseLog {
     return new ExerciseLog(exerciseId, [], null, "", undefined);
@@ -35,9 +42,9 @@ export class ExerciseLog {
     return new ExerciseLog(data.exerciseId, (data.sets ?? []).map(SetEntry.from), data.done ?? null, data.note ?? "", data.unit);
   }
 
-  /** The unit its weights are in: its own, or for a log saved without one, its exercise's. */
-  unitOr(exerciseUnit: LoadUnit): LoadUnit {
-    return this.unit ?? exerciseUnit;
+  /** The unit its weights are in: its own, or for a log saved without one, `bareUnit` (its exercise's `Exercise.bareUnit`). */
+  unitOr(bareUnit: LoadUnit): LoadUnit {
+    return this.unit ?? bareUnit;
   }
 
   /** Sets that have a weight or reps filled in. */

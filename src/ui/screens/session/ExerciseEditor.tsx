@@ -52,13 +52,14 @@ export function ExerciseEditor({
 }) {
   const [draft, setDraft] = useState(() => toDraft(exercise, log, last));
   const save = useDebounced(onSave, 400);
-  // Weights are edited in the unit this day's log was saved in (the exercise's for a new entry),
-  // so switching the exercise's unit never changes what an earlier day's numbers mean.
-  const unit = log?.unit ?? exercise.unit;
+  // Weights are edited in the unit this day's weights were saved in, so switching the exercise's
+  // unit never changes what an earlier day's numbers mean; a day without weights yet takes the
+  // exercise's. Decided when the editor opens: clearing a weight mid-edit doesn't switch it.
+  const [unit] = useState<LoadUnit>(() => (log && log.topWeight() !== null ? log.unitOr(exercise.bareUnit) : exercise.unit));
   const plates = unit === "plates";
   const unitPlaceholder = plates ? "plates" : "lb";
   const lastSets = last?.log.filledSets() ?? [];
-  const lastUnit = last?.log.unitOr(exercise.unit) ?? unit;
+  const lastUnit = last?.log.unitOr(exercise.bareUnit) ?? unit;
   /** Last time's weight in this editor's unit; null when it can't be said exactly (pounds → plates). */
   const lastWeight = (s: SetEntry | undefined) => {
     const weight = s?.weight ?? null;

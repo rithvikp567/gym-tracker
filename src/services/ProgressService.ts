@@ -75,7 +75,7 @@ export class ProgressService {
         const top = log?.topWeight() ?? null;
         if (!log || top === null) continue;
         // Each session in the unit it was saved in, so a unit switch doesn't rewrite history.
-        const unit = log.unitOr(exercise.unit);
+        const unit = log.unitOr(exercise.bareUnit);
         if (unit === "plates") {
           const pounds = platesToPounds(top);
           const reps = log.repsLabel();

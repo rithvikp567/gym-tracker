@@ -63,9 +63,9 @@ export class Session {
 
   /**
    * Files `fromId`'s log under `intoId` (merging two exercises). If both were logged that day,
-   * the two logs become one. `units` are the two exercises' units: the moved log keeps the unit
-   * its weights were saved in (given `from`'s if it had none; one without weights follows `into`),
-   * and weights in different units combine in pounds.
+   * the two logs become one. `units` are the two exercises' `bareUnit`s (the unit of their logs
+   * saved without one): the moved log keeps the unit its weights were saved in, written on it (one
+   * without weights follows `into`), and weights in different units combine in pounds.
    */
   mergeLogs(fromId: string, intoId: string, units: { from: LoadUnit; into: LoadUnit }): Session {
     const from = this.log(fromId);

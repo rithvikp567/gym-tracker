@@ -96,15 +96,16 @@ class StoreSessions implements SessionRepository {
     this.changed();
   }
 
-  async saveRepairs(sessions: Session[]): Promise<void> {
-    if (!sessions.length) return;
-    const records = sessions.map((s) => {
-      const stamp = Date.parse(s.updatedAt) + 1;
-      this.stamp.passed(stamp);
-      return s.withUpdatedAt(new Date(stamp).toISOString()).toJSON();
-    });
-    await this.store.putMany("sessions", records, "local");
-    this.changed();
+  async saveRepairs(sessions: Session[]): Promise<number> {
+    if (!sessions.length) return 0;
+    const repairs = sessions.map((s) => ({
+      record: s.withUpdatedAt(new Date(Date.parse(s.updatedAt) + 1).toISOString()).toJSON(),
+      basedOn: s.updatedAt,
+    }));
+    const saved = new Set(await this.store.putIfUnchanged("sessions", repairs));
+    for (const { record } of repairs) if (saved.has(record.id)) this.stamp.passed(Date.parse(record.updatedAt));
+    if (saved.size) this.changed();
+    return saved.size;
   }
 }
 

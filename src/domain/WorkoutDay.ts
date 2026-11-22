@@ -7,7 +7,7 @@ export interface RetiredExercise {
   id: string;
   /** The exercise it was merged into; missing when it was deleted. */
   mergedInto?: string;
-  /** Its unit when merged, for its logs saved without one. */
+  /** The unit of its logs saved without one when it was merged (its `Exercise.bareUnit`). */
   unit?: LoadUnit;
 }
 
@@ -164,7 +164,7 @@ export class WorkoutDay {
     const from = this.exercise(fromId);
     const into = this.exercise(intoId);
     if (!from || !into || fromId === intoId) return this;
-    return this.withExercise(into.withNamesOf(from)).retire({ id: fromId, mergedInto: intoId, unit: from.unit });
+    return this.withExercise(into.withNamesOf(from)).retire({ id: fromId, mergedInto: intoId, unit: from.bareUnit });
   }
 
   /** Moves an active exercise up (-1) or down (+1) among the active ones. */

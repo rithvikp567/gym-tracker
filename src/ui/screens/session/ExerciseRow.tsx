@@ -27,17 +27,17 @@ export function ExerciseRow({ exercise, log, last, showLast, open, onToggle, not
   const isCheck = exercise.kind === "check";
 
   // Each log is labeled in the unit it was saved in ("360" stays pounds after a switch to plates);
-  // exercise.unit only covers logs saved without one.
+  // exercise.bareUnit covers logs saved without one.
   const value = isCheck
     ? log?.done === true
       ? "Done"
       : log?.done === false
         ? "Skipped"
         : ""
-    : (log?.weightLabel(exercise.unit) ?? "");
+    : (log?.weightLabel(exercise.bareUnit) ?? "");
   const target = exercise.targetLabel();
   // Phone: "2×8 | Last: 20 – 8/6/6". Desktop shows the same value in its own column, minus "Last:".
-  const lastText = last ? last.log.summary(" – ", exercise.unit) : "";
+  const lastText = last ? last.log.summary(" – ", exercise.bareUnit) : "";
 
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {

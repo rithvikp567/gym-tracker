@@ -349,6 +349,25 @@ describe("SupabaseSync preferences", () => {
     expect(sync.status()).toMatchObject({ state: "idle", message: null });
   });
 
+  it("stays signed out when you sign out while a sync runs, whether that sync ends well or not", async () => {
+    for (const fails of [false, true]) {
+      supabase.signIn();
+      await settle();
+      let release = () => {};
+      supabase.account.gate = new Promise((resolve) => (release = resolve));
+      supabase.account.failPulls = fails;
+      sync.requestSync(0);
+      await settle(); // waiting on the server
+      expect(sync.status().state).toBe("syncing");
+      supabase.emit("SIGNED_OUT", null);
+      await settle();
+      supabase.account.gate = null;
+      release();
+      await settle();
+      expect(sync.status()).toMatchObject({ state: "signed-out", email: null, message: null });
+    }
+  });
+
   it("resets the sync status only when the account changes, not on a token refresh or a tab back in front", async () => {
     supabase.account.failPulls = true;
     sync.requestSync(0);

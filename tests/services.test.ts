@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { MemoryRecordStore } from "../src/data/MemoryRecordStore";
 import { TABLES, type TableName } from "../src/data/RecordStore";
-import { takesRemote } from "../src/data/recordSync";
+import { settle } from "../src/data/recordSync";
 import { StoreRepositories } from "../src/data/StoreRepositories";
 import { ExerciseLog } from "../src/domain/ExerciseLog";
 import { EPOCH, type Syncable } from "../src/domain/ids";
@@ -302,7 +302,9 @@ describe("SetupService exercise management", () => {
     const press = day.activeExercises()[0]!;
     await setup.setUnit(day.id, press.id, "plates", "keep");
     await imports.apply(plan);
-    expect(await summaries(day.id, press.id, "plates")).toEqual([["2026-03-03", "360 · 10"]]);
+    const bare = (await setup.days())[0]!.exercise(press.id)!.bareUnit;
+    expect(bare).toBe("lb");
+    expect(await summaries(day.id, press.id, bare)).toEqual([["2026-03-03", "360 · 10"]]);
   });
 });
 
@@ -325,9 +327,11 @@ describe("Units per log", () => {
     await sessions.saveLog(day.id, d("2026-11-17"), ExerciseLog.empty(press.id).withSets(sets(4, 8)).withUnit("plates"));
 
     expect(await points(day.id)).toEqual([["2026-11-10", 360, "360"], ["2026-11-17", 360, "4 pl"]]);
-    // The row's "Last: 360 – 10" (not "360 pl").
+    // The row's "Last: 360 – 10" (not "360 pl"): a log saved without a unit reads in the exercise's bareUnit.
     const last = await sessions.lastResultsBefore(day.id, d("2026-11-17"));
-    expect(last.get(press.id)?.log.summary(" – ", "plates")).toBe("360 – 10");
+    const exercise = (await setup.days())[0]!.exercise(press.id)!;
+    expect([exercise.unit, exercise.bareUnit]).toEqual(["plates", "lb"]);
+    expect(last.get(press.id)?.log.summary(" – ", exercise.bareUnit)).toBe("360 – 10");
 
     // And back to pounds: the plates day stays plates.
     expect(await setup.sessionsLoggedIn(day.id, press.id, "plates")).toBe(1);
@@ -450,7 +454,8 @@ describe("Logs that sync in after a merge or delete", () => {
   const worldClock: Clock = { now: () => new Date(now) };
   /**
    * Stand-in for Supabase: an upload replaces the server's copy unless it is older (the keep_newest
-   * trigger), and a download replaces the device's copy by SupabaseSync.apply's rule (takesRemote).
+   * trigger), and a download settles with the device's copy by SupabaseSync.apply's rule (settle):
+   * a local copy that wins a tie is queued to go up again.
    */
   let server: Map<string, { table: TableName; record: Syncable }>;
 
@@ -465,26 +470,38 @@ describe("Logs that sync in after a merge or delete", () => {
     return { store, repos, setup: new SetupService(repos), sessions: new SessionService(repos) };
   }
 
-  /** Push this device's outbox, then pull what's newer, the way SupabaseSync does. A minute passes. */
+  /**
+   * Push this device's outbox, then pull and settle, the way SupabaseSync does; a local copy that
+   * won a tie is queued again and goes up on a sync right after, as SupabaseSync's does. A minute passes.
+   */
   async function sync({ store }: Device): Promise<void> {
-    const outbox = await store.outbox();
-    for (const entry of outbox) {
-      const record = await store.get(entry.table, entry.id);
-      const held = server.get(`${entry.table}/${entry.id}`);
-      if (record && (!held || Date.parse(record.updatedAt) >= Date.parse(held.record.updatedAt))) {
-        server.set(`${entry.table}/${entry.id}`, { table: entry.table, record: structuredClone(record) });
+    for (let round = 0; round < 3; round++) {
+      const outbox = await store.outbox();
+      for (const entry of outbox) {
+        const record = await store.get(entry.table, entry.id);
+        const held = server.get(`${entry.table}/${entry.id}`);
+        if (record && (!held || Date.parse(record.updatedAt) >= Date.parse(held.record.updatedAt))) {
+          server.set(`${entry.table}/${entry.id}`, { table: entry.table, record: structuredClone(record) });
+        }
       }
-    }
-    await store.clearOutbox(outbox);
-    const waiting = new Set((await store.outbox()).map((e) => `${e.table}/${e.id}`));
-    for (const table of TABLES) {
-      const taken: Syncable[] = [];
-      for (const { table: t, record } of server.values()) {
-        if (t !== table) continue;
-        const local = await store.get(table, record.id);
-        if (takesRemote(record, local, waiting.has(`${table}/${record.id}`))) taken.push(structuredClone(record));
+      await store.clearOutbox(outbox);
+      const waiting = new Set((await store.outbox()).map((e) => `${e.table}/${e.id}`));
+      let requeued = false;
+      for (const table of TABLES) {
+        const taken: Syncable[] = [];
+        const again: Syncable[] = [];
+        for (const { table: t, record } of server.values()) {
+          if (t !== table) continue;
+          const local = await store.get(table, record.id);
+          const outcome = settle(record, local, waiting.has(`${table}/${record.id}`));
+          if (outcome === "take") taken.push(structuredClone(record));
+          if (outcome === "push" && local) again.push(local);
+        }
+        if (taken.length) await store.putMany(table, taken, "remote");
+        if (again.length) await store.putMany(table, again, "local");
+        requeued ||= again.length > 0;
       }
-      if (taken.length) await store.putMany(table, taken, "remote");
+      if (!requeued) break;
     }
     now += 60_000;
   }
@@ -586,7 +603,70 @@ describe("Logs that sync in after a merge or delete", () => {
     }
   });
 
-  it("puts every device on one copy when two repaired it differently", async () => {
+  it("keeps \"keep those in pounds\" when a device that hadn't heard of it saves an older session", async () => {
+    const { desktop, phone, day, exercises } = await lowerOnBoth("Leg press", "Squat");
+    const [press, squat] = exercises;
+    const date = d("2026-11-10");
+    // Pounds saved without a unit (an imported row, or a log from before units were stored).
+    await desktop.sessions.saveLog(day.id, date, ExerciseLog.empty(press!.id).withSets(sets(300, 10)));
+    await desktop.sessions.saveLog(day.id, date, ExerciseLog.empty(squat!.id).withSets(sets(225, 5)));
+    await sync(desktop);
+    await sync(phone);
+    // The phone switches to plates and keeps the old sessions in pounds...
+    await phone.setup.setUnit(day.id, press!.id, "plates", "keep");
+    await sync(phone);
+    // ...while the desktop, not synced since, adds a note to that day: the whole session goes up again.
+    await desktop.sessions.saveLog(day.id, date, ExerciseLog.empty(squat!.id).withSets(sets(225, 5)).withNote("belt"));
+    await sync(desktop);
+    await sync(phone);
+    for (const dev of [desktop, phone]) {
+      const line = (await new ProgressService(dev.repos, clock).lines(day.id, "ALL")).lines.find((l) => l.exercise.id === press!.id);
+      expect(line!.points.map((p) => [p.date.toString(), p.weight, p.label])).toEqual([["2026-11-10", 300, "300"]]); // not 27,000 lb
+      expect((await dev.sessions.find(day.id, date))!.log(squat!.id)!.note).toBe("belt");
+    }
+  });
+
+  it("never writes a repair over a save that landed while it ran", async () => {
+    /** Runs `during` once, after reading the sessions and before answering (a save landing mid-read). */
+    class SaveDuringRead extends MemoryRecordStore {
+      during: (() => Promise<unknown>) | null = null;
+      override async getAll<T extends Syncable>(table: TableName): Promise<T[]> {
+        const rows = await super.getAll<T>(table);
+        const during = this.during;
+        if (table === "sessions" && during) {
+          this.during = null;
+          await during();
+        }
+        return rows;
+      }
+    }
+    const store = new SaveDuringRead();
+    const repos = new StoreRepositories(store, worldClock);
+    const setup = new SetupService(repos);
+    const sessions = new SessionService(repos);
+    let day = await setup.createDay("Lower");
+    day = (await setup.updateDay(day.id, (x) => x.addExercise("Leg Press").addExercise("Legpress").addExercise("Squat")))!;
+    const [press, oldPress, squat] = day.allExercises();
+    const date = d("2026-11-18");
+    await sessions.saveLog(day.id, date, ExerciseLog.empty(oldPress!.id).withSets(sets(320, 10)));
+    await sessions.saveLog(day.id, date, ExerciseLog.empty(squat!.id).withSets(sets(225, 5)));
+    // A merge synced in from another device: the day knows, this session's log doesn't yet.
+    await repos.days.save((await repos.days.get(day.id))!.mergeExercise(oldPress!.id, press!.id));
+    now += 60_000;
+    // The squat editor's save lands while reconcile reads the sessions.
+    store.during = () => sessions.saveLog(day.id, date, ExerciseLog.empty(squat!.id).withSets(sets(225, 5, 5)));
+    const before = Date.parse((await sessions.find(day.id, date))!.updatedAt);
+
+    expect(await setup.reconcile()).toBe(1);
+    const session = (await sessions.find(day.id, date))!;
+    expect(new Map(session.logs.map((l) => [l.exerciseId, l.summary()]))).toEqual(
+      new Map([[press!.id, "320 · 10"], [squat!.id, "225 · 5/5"]]),
+    );
+    expect(Date.parse(session.updatedAt)).toBeGreaterThan(before);
+    expect((await store.outbox()).find((e) => e.table === "sessions")?.updatedAt).toBe(session.updatedAt);
+  });
+
+  it("puts every device on the copy that kept the late log when two repaired it differently", async () => {
     const { desktop, phone, day, exercises } = await lowerOnBoth("Leg Press", "Legpress");
     const [press, oldPress] = exercises;
     const laptop = device();
@@ -609,11 +689,46 @@ describe("Logs that sync in after a merge or delete", () => {
     expect(await shown(laptop)).toEqual([[press!.id, "300/320 · 10/10"]]);
     expect(await shown(desktop)).toEqual([[press!.id, "300 · 10"]]);
 
-    // The desktop's repair reaches the server last; a round of syncs later, everyone has it.
+    // The desktop's repair reaches the server last, but the laptop's kept the late set: a round of
+    // syncs later, everyone has the laptop's, and nothing is left to upload or repair.
     for (const dev of [laptop, desktop, phone, laptop, desktop, phone]) await sync(dev);
     for (const dev of [laptop, desktop, phone]) {
-      expect(await shown(dev)).toEqual([[press!.id, "300 · 10"]]);
+      expect(await shown(dev)).toEqual([[press!.id, "300/320 · 10/10"]]);
       expect(await dev.setup.reconcile()).toBe(0);
+      expect(await dev.store.outbox()).toEqual([]);
+    }
+  });
+
+  it("never loses a late log to a drop repair that uploaded last when the merge won", async () => {
+    const { desktop, phone, day, exercises } = await lowerOnBoth("Leg Press", "Legpress");
+    const [press, oldPress] = exercises;
+    const laptop = device();
+    await sync(laptop);
+    const date = d("2026-11-18");
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(oldPress!.id).withSets(sets(320, 10)));
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(press!.id).withSets(sets(300, 10)));
+    await sync(phone);
+    // Both offline: the desktop deletes the old name, then the laptop merges it (the later day edit).
+    await desktop.setup.deleteExercise(day.id, oldPress!.id);
+    now += 60_000;
+    await laptop.setup.mergeExercise(day.id, oldPress!.id, press!.id);
+    // The desktop syncs first and drops the late log, but its repair waits to upload...
+    await sync(desktop);
+    expect(await desktop.setup.reconcile()).toBe(1);
+    // ...while the laptop's merge wins the day, files the late log and uploads that.
+    await sync(laptop);
+    expect(await laptop.setup.reconcile()).toBe(1);
+    await sync(laptop);
+    // The desktop's drop reaches the server last.
+    await sync(desktop);
+    for (const dev of [laptop, phone, desktop, laptop, phone, desktop]) {
+      await sync(dev);
+      await dev.setup.reconcile();
+    }
+    const shown = async (dev: Device) => (await dev.sessions.find(day.id, date))?.logs.map((l) => [l.exerciseId, l.summary()]);
+    for (const dev of [laptop, desktop, phone]) {
+      expect((await dev.setup.days())[0]!.retiredExercises()).toEqual([{ id: oldPress!.id, mergedInto: press!.id, unit: "lb" }]);
+      expect(await shown(dev)).toEqual([[press!.id, "300/320 · 10/10"]]);
       expect(await dev.store.outbox()).toEqual([]);
     }
   });
@@ -704,15 +819,16 @@ describe("Logs that sync in after a merge or delete", () => {
 });
 
 describe("BackupService", () => {
-  it("exports each log's unit and the merged and deleted exercises", async () => {
+  it("exports each log's unit, each exercise's units, and the merged and deleted exercises", async () => {
     const { day, pull, tri } = await upperDay();
     await sessions.saveLog(day.id, d("2026-11-16"), ExerciseLog.empty(pull.id).withSets(sets(150, 8)));
     await setup.setUnit(day.id, pull.id, "plates", "keep");
+    await sessions.saveLog(day.id, d("2026-11-17"), ExerciseLog.empty(pull.id).withSets(sets(2, 8)).withUnit("plates"));
     await setup.deleteExercise(day.id, tri.id);
     const backup = JSON.parse(await new BackupService(repos).exportJson()) as { workoutDays: WorkoutDayData[]; sessions: SessionData[] };
-    expect(backup.sessions[0]!.logs[0]).toMatchObject({ exerciseId: pull.id, unit: "lb" });
+    expect(backup.sessions.map((s) => s.logs[0]!.unit)).toEqual([undefined, "plates"]);
     expect(backup.workoutDays[0]!.retired).toEqual([{ id: tri.id }]);
-    expect(backup.workoutDays[0]!.exercises[0]).toMatchObject({ unit: "plates", keyUnits: { pulldown: "lb" } });
+    expect(backup.workoutDays[0]!.exercises[0]).toMatchObject({ unit: "plates", bareUnit: "lb", keyUnits: { pulldown: "lb" } });
   });
 });
 
