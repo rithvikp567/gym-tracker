@@ -14,6 +14,8 @@ import { LocalDate, MONTH_SHORT } from "../../../domain/LocalDate";
 import { formatNumber } from "../../../domain/SetEntry";
 import type { ProgressData, RangeKey } from "../../../services/ProgressService";
 import type { ThemeName } from "../../../services/SettingsService";
+import { prefersReducedMotion } from "../../motion";
+import { useSettings } from "../../ServicesContext";
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, Tooltip);
 
@@ -100,13 +102,15 @@ export function WeightChart({
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const chart = useRef<Chart<"line", Point[]> | null>(null);
+  // A Custom theme keeps the id "custom" when its color changes: rebuild for the color too.
+  const { customThemeColor } = useSettings();
 
   useEffect(() => {
     if (!canvas.current) return;
     const allX = data.lines.flatMap((l) => l.points.map((p) => p.date.toUtcMs()));
     const max = data.to.toUtcMs();
     const min = data.from?.toUtcMs() ?? (allX.length ? Math.min(...allX) : max - 30 * DAY);
-    const surface = css("--bg");
+    const surface = css("--tile"); // the chart sits on a tile: dots ringed in its color
     const text2 = css("--text-2");
     const axis = css("--chart-axis");
     const grid = css("--chart-grid");
@@ -141,7 +145,7 @@ export function WeightChart({
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        animation: { duration: 250 },
+        animation: prefersReducedMotion() ? false : { duration: 250 },
         interaction: { mode: "nearest", axis: "x", intersect: false },
         layout: { padding: { top: 8, right: 8 } },
         scales: {
@@ -192,7 +196,7 @@ export function WeightChart({
     };
     // Rebuild when the data, range, colors, or theme change; visibility is handled below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, range, colors, theme]);
+  }, [data, range, colors, theme, theme === "custom" ? customThemeColor : null]);
 
   useEffect(() => {
     const c = chart.current;

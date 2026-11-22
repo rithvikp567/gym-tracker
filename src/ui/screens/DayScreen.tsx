@@ -1,5 +1,4 @@
 import { LocalDate } from "../../domain/LocalDate";
-import { CenterBlock } from "../components/CenterBlock";
 import { BackButton } from "../components/controls";
 import { Icon } from "../components/Icon";
 import { WorkoutRows } from "../components/WorkoutRows";
@@ -53,12 +52,14 @@ export function DayScreen({ date: iso }: { date: string }) {
               : "Nothing planned · log a workout?";
 
   return (
-    <div className="session-screen page-fill">
-      <div className="session-head">
-        <BackButton fallback={{ name: "home" }} />
-        <h1 className="session-name">{title}</h1>
-        <span className="session-jumps" />
-        <div className="session-sub">
+    <div className="session-screen day-screen">
+      {/* The same header as a workout's, so the ‹ › arrows sit in the same place on every day. */}
+      <header className="session-head">
+        <div className="session-top">
+          <BackButton fallback={{ name: "home" }} />
+          <h1 className="session-name">{title}</h1>
+        </div>
+        <DayArrows onStep={stepDay}>
           <label className="date-picker num">
             {date.labelWithWeek()}
             <Icon name="down" size={14} />
@@ -74,27 +75,28 @@ export function DayScreen({ date: iso }: { date: string }) {
               }}
             />
           </label>
-          <DayArrows onStep={stepDay} />
-        </div>
-      </div>
+        </DayArrows>
+      </header>
 
       <div className={`slide-body${slide ? ` slide-${slide}` : ""}`}>
-        <CenterBlock>
-          {days && data && (
-            <>
-              <div className="section-title centered">
-                <span>{note}</span>
-              </div>
-              <WorkoutRows
-                days={days}
-                date={date}
-                plannedDayId={data.info.plannedDayId}
-                sessions={data.info.sessions}
-                lastDone={data.lastDone}
-              />
-            </>
-          )}
-        </CenterBlock>
+        {/* The rows draw from your workout days at once, so the centered page doesn't move when the
+            day's plan and checks land (they fill in). */}
+        {days && (
+          <>
+            <div className="section-title centered">
+              <span />
+              <span>{note}</span>
+            </div>
+            <WorkoutRows
+              days={days}
+              date={date}
+              plannedDayId={data?.info.plannedDayId ?? null}
+              sessions={data?.info.sessions ?? []}
+              lastDone={data?.lastDone}
+              busy={!data}
+            />
+          </>
+        )}
       </div>
     </div>
   );

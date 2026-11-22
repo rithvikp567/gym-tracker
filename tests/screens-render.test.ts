@@ -103,7 +103,7 @@ describe("Home", () => {
 
     const html = home(s);
     expect(html).not.toContain("Loading");
-    expect(html).toContain("2 weeks ago");
+    expect(html).toContain("2 Weeks Ago");
     expect(html).toContain("Nov 2 – 8");
     expect(html).toContain("| Week 45");
     expect(html).toContain('aria-label="Previous week"');
@@ -125,7 +125,7 @@ describe("Home", () => {
     setViewState(HOME_PICK_KEY, homePick(d("2026-11-13"), today));
 
     const html = home(s);
-    expect(html).toContain("Last week");
+    expect(html).toContain("Last Week");
     expect(html).toContain('<span class="plan">U1</span>');
     expect(html).toContain("Mon, Nov 9, worked out");
     expect(html).not.toMatch(/class="week-strip"[^>]*aria-busy/);
@@ -139,7 +139,7 @@ describe("Home", () => {
     await s.setup.createDay("Upper 1"); // a change: the cached [] may be out of date now
     const html = home(s);
     expect(html).not.toContain("set up your week");
-    expect(html).toContain("This week");
+    expect(html).toContain("This Week");
   });
 
   it("keeps the sync chip's space while sync is set up but quiet", async () => {
@@ -158,6 +158,18 @@ describe("Home", () => {
     // No sync on this site: no chip and no space for one.
     expect(await homeWith({})).not.toContain('class="chip');
     expect(await homeWith({ mode: "demo" })).toContain("Demo data");
+  });
+
+  it("puts the week's title between its arrows on the week tile, and offers Today only away from today", async () => {
+    const s = makeServices();
+    await upperAndLower(s);
+    await cacheDays(s);
+    const html = home(s);
+    expect(html).toMatch(/class="tile week-tile"[\s\S]*aria-label="Previous week"[\s\S]*<h1>This Week<\/h1>[\s\S]*aria-label="Next week"[\s\S]*class="week-strip"/);
+    expect(html).not.toContain(">Today</button>");
+
+    setViewState(HOME_PICK_KEY, homePick(d("2026-11-18"), s.calendar.today()));
+    expect(home(s)).toContain(">Today</button>");
   });
 
   it("puts each year on its own end of a week that spans New Year", async () => {
@@ -229,6 +241,48 @@ describe("Session screen", () => {
     await cacheSession(s, upper.id, d("2026-11-20"));
     const logged = render(s, SessionScreen, props);
     expect(logged).toContain('<div class="session-foot"><button type="button" class="btn danger">');
+  });
+});
+
+describe("Workout and rest-day headers", () => {
+  it("centers the name, puts the date between the day arrows, and Last / Next session under them", async () => {
+    const s = makeServices();
+    const { upper } = await upperAndLower(s);
+    await cacheDays(s);
+    await cacheSession(s, upper.id, d("2026-11-20"));
+    const html = render(s, SessionScreen, { dayId: upper.id, date: "2026-11-20" });
+    expect(html).toMatch(/class="session-top"><a class="icon-btn"[^>]*aria-label="Back"[\s\S]*<h1 class="session-name">Upper 1<\/h1><\/div>/);
+    expect(html).toMatch(/aria-label="Previous day"[\s\S]*Fri, Nov 20 \| Week 47[\s\S]*aria-label="Next day"[\s\S]*class="session-jumps"/);
+  });
+
+  it("gives a rest day the same first two lines, so the arrows stay in place between days", async () => {
+    const s = makeServices();
+    await upperAndLower(s);
+    await cacheDays(s);
+    await cacheDay(s, d("2026-11-15"));
+    const html = render(s, DayScreen, { date: "2026-11-15" });
+    expect(html).toMatch(/class="session-top"><a class="icon-btn"[\s\S]*<h1 class="session-name">Rest day<\/h1><\/div>/);
+    expect(html).toMatch(/aria-label="Previous day"[\s\S]*Sun, Nov 15 \| Week 46[\s\S]*aria-label="Next day"/);
+    expect(html).not.toContain("session-jumps");
+  });
+
+  it("draws a workout's rows from the day before its session loads, so the centered page doesn't move when it lands", async () => {
+    const s = makeServices();
+    const { upper } = await upperAndLower(s);
+    await cacheDays(s); // the session itself isn't cached
+    const html = render(s, SessionScreen, { dayId: upper.id, date: "2026-11-20" });
+    expect(html).toContain('<span class="label" role="button" tabindex="0" aria-expanded="false">Pulldown</span>');
+    expect(html).toContain('class="session-foot is-hidden"');
+  });
+
+  it("draws a rest day's rows from your workout days before the day loads", async () => {
+    const s = makeServices();
+    const { upper } = await upperAndLower(s);
+    await cacheDays(s);
+    const html = render(s, DayScreen, { date: "2026-11-15" });
+    expect(html).toContain(`href="#/session/${upper.id}/2026-11-15"`);
+    expect(html).toMatch(/class="list" aria-busy="true"/);
+    expect(html).not.toContain("Rest day");
   });
 });
 

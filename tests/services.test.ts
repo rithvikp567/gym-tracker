@@ -17,7 +17,7 @@ import { ImportService } from "../src/services/ImportService";
 import type { ImportedLog, ImportPlan } from "../src/services/ImportPlan";
 import { ProgressService } from "../src/services/ProgressService";
 import { SessionService } from "../src/services/SessionService";
-import { SettingsService } from "../src/services/SettingsService";
+import { cleanAccentColor, cleanColor, MIN_ACCENT_ALPHA, SettingsService, withRecentColor } from "../src/services/SettingsService";
 import { SetupService } from "../src/services/SetupService";
 import type { Clock, KeyValueStore } from "../src/services/ports";
 
@@ -891,28 +891,39 @@ describe("SettingsService", () => {
     const map = new Map<string, string>(initial ? [["gym-tracker.settings", JSON.stringify(initial)]] : []);
     return { get: (k) => map.get(k) ?? null, set: (k, v) => void map.set(k, v) };
   };
+  /** Every setting at its default, and each one's stamp while untouched. */
+  const DEFAULT_VALUES = {
+    theme: "oled",
+    customThemeColor: null,
+    accent: "lime",
+    customAccentColor: null,
+    recentThemeColors: [],
+    recentAccentColors: [],
+    showLastSession: true,
+  };
+  const UNTOUCHED = Object.fromEntries(Object.keys(DEFAULT_VALUES).map((k) => [k, EPOCH]));
 
   it("stamps changes for sync and tells sync about them", () => {
     const settings = new SettingsService(memoryStore(), clock);
     expect(settings.snapshot().updatedAt).toBe(EPOCH); // untouched defaults
     let changes = 0;
     settings.onLocalChange(() => changes++);
-    settings.update({ theme: "graphite" });
+    settings.update({ theme: "sand" });
     expect(changes).toBe(1);
     const now = clock.now().toISOString();
     expect(settings.snapshot()).toEqual({
-      values: { theme: "graphite", showLastSession: true },
+      values: { ...DEFAULT_VALUES, theme: "sand" },
       updatedAt: now,
-      stamps: { theme: now, showLastSession: EPOCH }, // only the setting that changed
+      stamps: { ...UNTOUCHED, theme: now }, // only the setting that changed
     });
   });
 
   it("never stamps a change earlier than the stamp it replaces", () => {
     const settings = new SettingsService(memoryStore(), clock);
     const ahead = new Date(clock.now().getTime() + 3_600_000); // copied from a device whose clock is an hour fast
-    settings.applyRemote({ values: { theme: "graphite" }, updatedAt: ahead.toISOString() });
+    settings.applyRemote({ values: { theme: "midnight" }, updatedAt: ahead.toISOString() });
     settings.update({ theme: "oled" });
-    expect(settings.snapshot().stamps).toEqual({ theme: new Date(ahead.getTime() + 1).toISOString(), showLastSession: EPOCH });
+    expect(settings.snapshot().stamps).toEqual({ ...UNTOUCHED, theme: new Date(ahead.getTime() + 1).toISOString() });
   });
 
   it("dates choices saved before sync just after the epoch, so any real change wins", () => {
@@ -923,14 +934,14 @@ describe("SettingsService", () => {
 
   it("dates settings saved before per-setting stamps by their copy's time, and survives damaged times", () => {
     const older = new SettingsService(memoryStore({ theme: "graphite", showLastSession: false, updatedAt: "2026-11-21T10:00:00Z" }), clock);
-    expect(older.snapshot().stamps).toEqual({ theme: "2026-11-21T10:00:00.000Z", showLastSession: "2026-11-21T10:00:00.000Z" });
+    expect(older.snapshot().stamps).toEqual({ ...UNTOUCHED, theme: "2026-11-21T10:00:00.000Z", showLastSession: "2026-11-21T10:00:00.000Z" });
     // A setting missing from the saved copy (added in a later version) was never chosen here.
     const missing = new SettingsService(memoryStore({ theme: "graphite", updatedAt: "2026-11-21T10:00:00.000Z" }), clock);
-    expect(missing.snapshot().stamps).toEqual({ theme: "2026-11-21T10:00:00.000Z", showLastSession: EPOCH });
+    expect(missing.snapshot().stamps).toEqual({ ...UNTOUCHED, theme: "2026-11-21T10:00:00.000Z" });
     const damaged = new SettingsService(memoryStore({ theme: "graphite", updatedAt: "soon", stamps: { theme: 42, showLastSession: "later" } }), clock);
     expect(damaged.snapshot().updatedAt).toBe("1970-01-01T00:00:00.001Z");
     damaged.update({ showLastSession: false });
-    expect(damaged.snapshot().stamps).toEqual({ theme: "1970-01-01T00:00:00.001Z", showLastSession: clock.now().toISOString() });
+    expect(damaged.snapshot().stamps).toEqual({ ...UNTOUCHED, theme: "1970-01-01T00:00:00.001Z", showLastSession: clock.now().toISOString() });
   });
 
   it("applies another device's copy without echoing it back, and ignores bad values", () => {
@@ -943,23 +954,149 @@ describe("SettingsService", () => {
     settings.applyRemote({ values: { theme: "graphite", showLastSession: "yes", junk: 1 }, updatedAt: "2026-11-21T10:00:00.000Z" });
     expect(changes).toBe(0);
     expect(seen).toBe("graphite");
-    expect(settings.get()).toEqual({ theme: "graphite", showLastSession: true });
+    // Graphite from before accents were a setting still shows its blue.
+    expect(settings.get()).toEqual({ ...DEFAULT_VALUES, theme: "graphite", accent: "blue" });
     // Survives a restart with its timestamp.
     expect(new SettingsService(store, clock).snapshot().updatedAt).toBe("2026-11-21T10:00:00.000Z");
+    // A theme this version doesn't know (a later version's) leaves this one, and its stamp, alone.
     settings.applyRemote({ values: { theme: "neon" }, updatedAt: "2026-11-21T11:00:00.000Z" });
-    expect(settings.get().theme).toBe("oled");
+    expect(settings.get().theme).toBe("graphite");
+    expect(settings.snapshot().stamps?.theme).toBe("2026-11-21T10:00:00.000Z");
   });
 
   it("keeps each setting's own stamp from another device's copy, across a restart", () => {
     const store = memoryStore();
     const settings = new SettingsService(store, clock);
     const copy = {
-      values: { theme: "graphite", showLastSession: false },
+      values: {
+        ...DEFAULT_VALUES,
+        theme: "graphite",
+        showLastSession: false,
+        accent: "custom",
+        customAccentColor: "#12345680",
+        recentAccentColors: ["#12345680", "#abcdef"],
+      },
       updatedAt: "2026-11-21T12:00:00.000Z",
-      stamps: { theme: "2026-11-21T11:00:00.000Z", showLastSession: "2026-11-21T12:00:00.000Z" },
+      stamps: {
+        ...UNTOUCHED,
+        theme: "2026-11-21T11:00:00.000Z",
+        showLastSession: "2026-11-21T12:00:00.000Z",
+        accent: "2026-11-21T11:30:00.000Z",
+        customAccentColor: "2026-11-21T11:30:00.000Z",
+        recentAccentColors: "2026-11-21T11:30:00.000Z",
+      },
     };
     settings.applyRemote(copy);
     expect(settings.snapshot()).toEqual(copy);
     expect(new SettingsService(store, clock).snapshot()).toEqual(copy);
+  });
+
+  it("shows the accent each theme had until one is picked, and a theme change keeps the accent on screen", () => {
+    // Saved by v0.3.0: Graphite, no accent yet.
+    const old = new SettingsService(memoryStore({ theme: "graphite", showLastSession: true, updatedAt: "2026-11-21T10:00:00.000Z" }), clock);
+    expect(old.get().accent).toBe("blue");
+    expect(old.snapshot().values.accent).toBe("lime"); // the stored default, the same on every device
+    old.update({ theme: "sand" });
+    expect(old.get()).toMatchObject({ theme: "sand", accent: "blue" }); // kept as a pick
+    expect(old.snapshot().stamps?.accent).toBe(clock.now().toISOString());
+
+    // New: OLED and Lime. Picking Graphite keeps Lime.
+    const fresh = new SettingsService(memoryStore(), clock);
+    expect(fresh.get()).toMatchObject({ theme: "oled", accent: "lime" });
+    fresh.update({ theme: "graphite" });
+    expect(fresh.get()).toMatchObject({ theme: "graphite", accent: "lime" });
+
+    // A theme that shows the same accent stamps only the theme.
+    const light = new SettingsService(memoryStore(), clock);
+    light.update({ theme: "light" });
+    expect(light.snapshot().stamps?.accent).toBe(EPOCH);
+
+    // Picked accents stay put.
+    const picked = new SettingsService(memoryStore(), clock);
+    picked.update({ accent: "teal" });
+    picked.update({ theme: "graphite" });
+    expect(picked.get().accent).toBe("teal");
+  });
+
+  it("saves custom colors and recent lists, and drops junk from a damaged copy", () => {
+    const settings = new SettingsService(memoryStore(), clock);
+    settings.update({ theme: "custom", customThemeColor: "#1A2B3C", recentThemeColors: ["#1A2B3C"] });
+    expect(settings.get()).toMatchObject({ theme: "custom", customThemeColor: "#1a2b3c", recentThemeColors: ["#1a2b3c"] });
+    settings.update({ accent: "custom", customAccentColor: "#ff8800ff" }); // fully opaque: stored without alpha
+    expect(settings.get()).toMatchObject({ accent: "custom", customAccentColor: "#ff8800" });
+
+    const before = settings.snapshot().stamps!;
+    settings.applyRemote({
+      values: {
+        customThemeColor: "red",
+        recentThemeColors: ["#111111", "nope", 7, "#111111", "#222222", "#333333", "#444444", "#555555", "#666666"],
+        recentAccentColors: "#123456",
+        accent: "custom",
+        customAccentColor: { r: 1 },
+      },
+      updatedAt: "2026-11-21T10:00:00.000Z",
+    });
+    const s = settings.get();
+    // A color it can't read leaves the good one here, so Custom keeps showing it; a list keeps its
+    // valid colors.
+    expect(s).toMatchObject({ theme: "custom", customThemeColor: "#1a2b3c", accent: "custom", customAccentColor: "#ff8800", recentAccentColors: [] });
+    expect(s.recentThemeColors).toEqual(["#111111", "#222222", "#333333", "#444444", "#555555"]);
+    // The skipped settings keep their own stamps, so the next sync can't send a fallback for them
+    // back to the account as the newest copy.
+    const after = settings.snapshot().stamps!;
+    for (const k of ["customThemeColor", "customAccentColor", "recentAccentColors"] as const) expect(after[k], k).toBe(before[k]);
+    expect(after.recentThemeColors).toBe("2026-11-21T10:00:00.000Z");
+    expect(after.accent).toBe("2026-11-21T10:00:00.000Z");
+  });
+
+  it("doesn't let a damaged copy erase a custom color or flip Custom to OLED, here or on the account", () => {
+    const settings = new SettingsService(memoryStore(), clock);
+    settings.update({ theme: "custom", customThemeColor: "#5a2e18" });
+    const later = new Date(clock.now().getTime() + 60_000).toISOString();
+    const junk = { values: { theme: "custom", customThemeColor: "oklch(40% 0.1 40)" }, updatedAt: later, stamps: { theme: later, customThemeColor: later } };
+    settings.applyRemote(junk);
+    expect(settings.get()).toMatchObject({ theme: "custom", customThemeColor: "#5a2e18" });
+    // What goes back to the account still carries the good color.
+    expect(settings.snapshot().values).toMatchObject({ theme: "custom", customThemeColor: "#5a2e18" });
+    // Custom with no color anywhere isn't taken either: the theme here stays.
+    const plain = new SettingsService(memoryStore(), clock);
+    plain.update({ theme: "sand" });
+    plain.applyRemote({ values: { theme: "custom", customThemeColor: null }, updatedAt: later });
+    expect(plain.get().theme).toBe("sand");
+    // A real change from another device still comes through.
+    settings.applyRemote({ values: { customThemeColor: "#0b1a2e" }, updatedAt: later, stamps: { customThemeColor: later } });
+    expect(settings.get()).toMatchObject({ theme: "custom", customThemeColor: "#0b1a2e" });
+  });
+
+  it("raises a Custom accent too see-through to show to the picker's lowest opacity, stored or synced", () => {
+    expect(MIN_ACCENT_ALPHA).toBe(0.2);
+    expect(cleanAccentColor("#ff000000")).toBe("#ff000033");
+    expect(cleanAccentColor("#ff000032")).toBe("#ff000033");
+    expect(cleanAccentColor("#ff000033")).toBe("#ff000033");
+    expect(cleanAccentColor("#FF000080")).toBe("#ff000080");
+    expect(cleanAccentColor("#ff0000")).toBe("#ff0000");
+    expect(cleanAccentColor("red")).toBeNull();
+    const settings = new SettingsService(memoryStore({ accent: "custom", customAccentColor: "#3d7bff00", recentAccentColors: ["#3d7bff00"] }), clock);
+    expect(settings.get()).toMatchObject({ accent: "custom", customAccentColor: "#3d7bff33", recentAccentColors: ["#3d7bff33"] });
+    settings.applyRemote({ values: { customAccentColor: "#12345605" }, updatedAt: "2026-11-21T10:00:00.000Z" });
+    expect(settings.get().customAccentColor).toBe("#12345633");
+    // A theme can be fully see-through: that is plain black or white.
+    settings.update({ theme: "custom", customThemeColor: "#12345600" });
+    expect(settings.get().customThemeColor).toBe("#12345600");
+  });
+
+  it("keeps recent colors newest first, without repeats, five at most", () => {
+    let list: string[] = [];
+    for (const c of ["#111111", "#222222", "#333333", "#111111", "#444444", "#555555", "#666666"]) list = withRecentColor(list, c);
+    expect(list).toEqual(["#666666", "#555555", "#444444", "#111111", "#333333"]);
+    expect(withRecentColor(list, "#444444")).toEqual(["#444444", "#666666", "#555555", "#111111", "#333333"]);
+    expect(withRecentColor([], "#ABCDEF")).toEqual(["#abcdef"]);
+  });
+
+  it("cleans colors to lowercase #rrggbb or #rrggbbaa", () => {
+    expect(cleanColor("#ABCDEF")).toBe("#abcdef");
+    expect(cleanColor("#abcdef80")).toBe("#abcdef80");
+    expect(cleanColor("#abcdefFF")).toBe("#abcdef");
+    for (const bad of ["abcdef", "#abc", "#abcdeg", "#abcdef8", "", null, 42, ["#abcdef"]]) expect(cleanColor(bad)).toBeNull();
   });
 });

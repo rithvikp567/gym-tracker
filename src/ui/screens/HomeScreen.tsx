@@ -1,12 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { LocalDate, WEEKDAY_LETTER } from "../../domain/LocalDate";
 import type { CalendarDay } from "../../services/CalendarService";
-import { CenterBlock } from "../components/CenterBlock";
 import { Icon } from "../components/Icon";
 import { WorkoutRows } from "../components/WorkoutRows";
 import { useViewState } from "../hooks/useViewState";
 import { useSwipe } from "../hooks/useSwipe";
 import { HOME_PICK_KEY, homePick, homeWeek, weekRangeLabel, type HomePick } from "../homePick";
+import { play } from "../motion";
 import { href } from "../router";
 import { prefetchLive, useLive, useLiveState, useServices, useSyncStatus } from "../ServicesContext";
 
@@ -19,10 +19,11 @@ function shortName(name: string): string {
 }
 
 function weekTitle(offset: number): string {
-  if (offset === 0) return "This week";
-  if (offset === -1) return "Last week";
-  if (offset === 1) return "Next week";
-  return offset < 0 ? `${-offset} weeks ago` : `In ${offset} weeks`;
+  // Title case, like a heading ("Last Week"), as the user asked.
+  if (offset === 0) return "This Week";
+  if (offset === -1) return "Last Week";
+  if (offset === 1) return "Next Week";
+  return offset < 0 ? `${-offset} Weeks Ago` : `In ${offset} Weeks`;
 }
 
 export function HomeScreen() {
@@ -69,60 +70,63 @@ export function HomeScreen() {
   const rowsDay = (thisWeek ?? week.previous)?.find((d) => d.date.weekday() === picked.weekday());
 
   return (
-    <div className="home page-fill">
-      <header className="screen-head home-head">
-        <div>
-          <h1>{weekTitle(offset)}</h1>
-          {/* If it can't fit on one line (a New Year week beside the Today link), only the week number wraps. */}
-          <div className="sub num">
-            <span>{weekRangeLabel(weekStart, today)}</span> <span>| Week {weekStart.isoWeek()}</span>
+    <div className="home">
+      {/* The week is the page's title: ‹ › around it, the strip under it, all on one tile. */}
+      <section className="tile week-tile" aria-label="Week">
+        <header className="week-head">
+          <button type="button" className="icon-btn" aria-label="Previous week" onClick={() => choose(picked.addDays(-7))}>
+            <Icon name="left" size={20} />
+          </button>
+          <div className="week-title">
+            <h1>{weekTitle(offset)}</h1>
+            {/* If it can't fit on one line (a New Year week on a phone), only the week number wraps. */}
+            <div className="sub num">
+              <span>{weekRangeLabel(weekStart, today)}</span> <span>| Week {weekStart.isoWeek()}</span>
+            </div>
           </div>
-        </div>
-        <div className="home-head-side">
-          <SyncChip />
-          <div className="week-nav" role="group" aria-label="Week">
-            {offset !== 0 && (
-              <button type="button" className="link" onClick={() => choose(today)}>
-                Today
-              </button>
-            )}
-            <button type="button" className="icon-btn" aria-label="Previous week" onClick={() => choose(picked.addDays(-7))}>
-              <Icon name="left" size={20} />
-            </button>
-            <button type="button" className="icon-btn" aria-label="Next week" onClick={() => choose(picked.addDays(7))}>
-              <Icon name="right" size={20} />
-            </button>
-          </div>
-        </div>
-      </header>
+          <button type="button" className="icon-btn" aria-label="Next week" onClick={() => choose(picked.addDays(7))}>
+            <Icon name="right" size={20} />
+          </button>
+        </header>
 
-      <WeekStrip
-        dates={dates}
-        week={thisWeek}
-        today={today}
-        picked={picked}
-        dayName={dayName}
-        onPick={choose}
-        onPrevWeek={() => choose(picked.addDays(-7))}
-        onNextWeek={() => choose(picked.addDays(7))}
+        <WeekStrip
+          dates={dates}
+          week={thisWeek}
+          today={today}
+          picked={picked}
+          dayName={dayName}
+          onPick={choose}
+          onPrevWeek={() => choose(picked.addDays(-7))}
+          onNextWeek={() => choose(picked.addDays(7))}
+        />
+      </section>
+
+      {/* The picked day in the middle; "Today" (back to it) on the left, "Edit days" on the right. */}
+      <div className="section-title centered">
+        <span>
+          {!picked.equals(today) && (
+            <button type="button" className="link" onClick={() => choose(today)}>
+              Today
+            </button>
+          )}
+        </span>
+        <span>{picked.equals(today) ? "Today" : picked.label()}</span>
+        <a className="link" href={href({ name: "setup" })}>
+          Edit days
+        </a>
+      </div>
+      <WorkoutRows
+        days={workoutDays}
+        date={picked}
+        plannedDayId={rowsDay?.plannedDayId ?? null}
+        sessions={rowsDay?.sessions ?? []}
+        lastDone={lastDone}
+        busy={!thisWeek || !lastDone}
       />
 
-      <CenterBlock>
-        <div className="section-title centered">
-          <span>{picked.equals(today) ? "Today" : picked.label()}</span>
-          <a className="link" href={href({ name: "setup" })}>
-            Edit days
-          </a>
-        </div>
-        <WorkoutRows
-          days={workoutDays}
-          date={picked}
-          plannedDayId={rowsDay?.plannedDayId ?? null}
-          sessions={rowsDay?.sessions ?? []}
-          lastDone={lastDone}
-          busy={!thisWeek || !lastDone}
-        />
-      </CenterBlock>
+      <div className="home-foot">
+        <SyncChip />
+      </div>
     </div>
   );
 }
@@ -151,6 +155,16 @@ function WeekStrip({
 }) {
   const strip = useRef<HTMLDivElement>(null);
   useSwipe(strip, { onSwipeRight: onPrevWeek, onSwipeLeft: onNextWeek });
+  // Another week slides in from its side. The same 7 buttons stay (no remount), so it's played
+  // from code when the week changes rather than by a CSS animation on mount.
+  const shownWeek = useRef(dates[0]!);
+  useLayoutEffect(() => {
+    const from = shownWeek.current;
+    shownWeek.current = dates[0]!;
+    if (from.equals(dates[0]!)) return;
+    const side = dates[0]!.isBefore(from) ? -1 : 1;
+    play(strip.current, [{ transform: `translateX(${side * 24}px)`, opacity: 0.35 }, { transform: "none", opacity: 1 }], 220);
+  });
   return (
     <div className="week-strip" role="group" aria-label="Pick a day" aria-busy={week ? undefined : true} ref={strip}>
       {dates.map((date, i) => {
@@ -178,9 +192,9 @@ function WeekStrip({
 }
 
 /**
- * Sync status (or "Demo data") above the week arrows. When sync is set up, its slot is kept even
- * while there's nothing to say yet (sign-in finishes after Home draws, sometimes after a token
- * refresh), so the chip appearing never makes the header taller and moves the strip.
+ * Sync status (or "Demo data") under the rows. When sync is set up, its slot is kept even while
+ * there's nothing to say yet (sign-in finishes after Home draws, sometimes after a token refresh),
+ * so the chip appearing never makes the page taller and moves the centered strip.
  */
 function SyncChip() {
   const { mode } = useServices();

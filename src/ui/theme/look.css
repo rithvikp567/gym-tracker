@@ -1,0 +1,524 @@
+/*
+ * Settings → Appearance (screens/settings/LookSettings.tsx), the color picker (ColorPicker.tsx)
+ * and the signed-in account row (AccountCard.tsx).
+ *
+ * Every swatch and theme preview carries its own data-accent / data-theme / data-family, so
+ * tokens.css colors it as itself. The color wheel and the picker's tracks show the color space
+ * itself (hues, black to the color), so they're the only literal colors here; a color the user
+ * picked arrives as --swatch / --thumb / --track from the component.
+ */
+
+/* ───────────── Appearance ───────────── */
+
+/* Laid out by its own width (see the end of this section), so it fits a phone, a centered
+   column or a wide desktop panel alike. A size container can't take its width from its
+   content, so it always fills the column it's in (a centered flex column would shrink it). */
+.look {
+  container-type: inline-size;
+  width: 100%;
+}
+
+.look-group + .look-group {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 0.5px solid var(--hairline);
+}
+
+.look-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.look-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.look-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Accent swatches: eight presets and Custom, spread across the row. */
+.accent-grid {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 44px));
+  justify-content: space-between;
+  gap: 2px;
+}
+
+.accent-choice {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 1;
+  min-width: 0;
+  border-radius: 50%;
+}
+
+.accent-dot {
+  position: relative;
+  width: 74%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--accent-d, var(--text));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  forced-color-adjust: none;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    outline-color var(--dur-fast) var(--ease-out);
+}
+
+[data-family="light"] .accent-dot {
+  background: var(--accent-l, var(--text));
+}
+
+.accent-choice:active .accent-dot {
+  transform: scale(0.88);
+}
+
+.accent-choice[aria-checked="true"] .accent-dot {
+  outline-color: var(--text);
+}
+
+@media (hover: hover) {
+  .accent-choice:hover .accent-dot {
+    transform: scale(1.08);
+  }
+}
+
+/* Custom: a color-wheel ring; once a color is picked, that color inside the ring. */
+.accent-choice.is-custom .accent-dot,
+[data-family="light"] .accent-choice.is-custom .accent-dot {
+  background:
+    linear-gradient(var(--text-2), var(--text-2)) center / 38% 2px no-repeat,
+    linear-gradient(var(--text-2), var(--text-2)) center / 2px 38% no-repeat;
+  box-shadow: none;
+}
+
+.accent-choice.is-custom.is-set .accent-dot {
+  background: none;
+}
+
+.accent-choice.is-custom .accent-dot::before,
+.accent-choice.is-custom.is-set .accent-dot::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+}
+
+.accent-choice.is-custom .accent-dot::before {
+  inset: 0;
+  background: conic-gradient(
+    hsl(0 85% 60%),
+    hsl(60 85% 55%),
+    hsl(120 70% 50%),
+    hsl(180 75% 50%),
+    hsl(240 80% 65%),
+    hsl(300 75% 60%),
+    hsl(360 85% 60%)
+  );
+  -webkit-mask: radial-gradient(closest-side, transparent 72%, black 75%);
+  mask: radial-gradient(closest-side, transparent 72%, black 75%);
+}
+
+.accent-choice.is-custom.is-set .accent-dot::after {
+  inset: 22%;
+  background: var(--swatch);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent);
+}
+
+/* Theme tiles: three light, three dark, then Custom across the row. */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.theme-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 5px 7px;
+  border: 1px solid var(--accent-line);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+.theme-choice:active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) {
+  .theme-choice:hover {
+    background: var(--surface-raised);
+  }
+}
+
+.theme-choice[aria-checked="true"] {
+  border-color: var(--text);
+  box-shadow: 0 0 0 1px var(--text);
+}
+
+/* A tiny picture of a theme: its background, a tile, a stripe of the accent. */
+.theme-mini {
+  display: grid;
+  place-items: center;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.theme-mini i {
+  width: 64%;
+  height: 52%;
+  border-radius: 4px;
+  background: var(--tile);
+  box-shadow:
+    0 0 0 1px var(--tile-line),
+    inset 0 -4px 0 var(--accent);
+}
+
+.theme-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.theme-choice.is-custom {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 14px 5px 5px;
+}
+
+/* As wide as the pictures in the tiles above, so they line up: with this tile's content box C
+   (the grid's width less 21px of border and padding), a tile above is (C + 5px) / 3 wide and
+   its picture 12px narrower. */
+.theme-choice.is-custom .theme-mini {
+  flex: 0 0 calc(100% / 3 - 10.33px);
+}
+
+/* The name sits at the right end of the row. */
+.theme-choice.is-custom .theme-name {
+  margin-left: auto;
+  text-align: right;
+}
+
+/* No custom theme yet: the picture is a color wheel. */
+.theme-choice.is-custom:not(.is-set) .theme-mini {
+  background: conic-gradient(
+    from 90deg,
+    hsl(0 60% 55%),
+    hsl(60 60% 55%),
+    hsl(120 45% 50%),
+    hsl(180 50% 50%),
+    hsl(240 55% 62%),
+    hsl(300 50% 58%),
+    hsl(360 60% 55%)
+  );
+}
+
+/* Wide (a desktop panel): as on a phone (and in the reference), the swatches spread across the
+   card and the themes take its whole width, so the names on the right of each header sit over
+   the last swatch and the last column; only the pictures grow. */
+@container (min-width: 600px) {
+  .theme-grid {
+    gap: 10px;
+  }
+
+  .theme-mini {
+    height: 52px;
+  }
+
+  /* The same sum as above with 10px gaps: a tile above is (C + 1px) / 3 wide, its picture 12px narrower. */
+  .theme-choice.is-custom .theme-mini {
+    flex-basis: calc(100% / 3 - 11.67px);
+  }
+}
+
+/* ───────────── Account and sync (signed in) ───────────── */
+
+.account-row .text {
+  min-width: 0;
+}
+
+/* Wraps after the "@" (AccountCard adds the break), anywhere only if a part alone is too long. */
+.account-email {
+  overflow-wrap: anywhere;
+}
+
+.account-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn.account-btn {
+  min-height: 34px;
+  padding: 0 12px;
+  gap: 6px;
+  font-size: 14px;
+}
+
+/* ───────────── Color picker ───────────── */
+
+/* Only there to see where a press started (ColorPicker): no box of its own. */
+.cp-layer {
+  display: contents;
+}
+
+.cp {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Hue around, saturation outward (white in the middle); --shade darkens it with the brightness. */
+.cp-wheel {
+  position: relative;
+  width: min(232px, 62vw, 32dvh);
+  aspect-ratio: 1;
+  margin: 2px auto 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(closest-side, hsl(0 0% 100%), hsl(0 0% 100% / 0)),
+    conic-gradient(
+      hsl(0 100% 50%),
+      hsl(60 100% 50%),
+      hsl(120 100% 50%),
+      hsl(180 100% 50%),
+      hsl(240 100% 50%),
+      hsl(300 100% 50%),
+      hsl(360 100% 50%)
+    );
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  touch-action: none;
+  cursor: crosshair;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cp-wheel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: hsl(0 0% 0%);
+  opacity: var(--shade);
+  pointer-events: none;
+}
+
+.cp-wheel:focus-visible {
+  outline-offset: 4px;
+  border-radius: 50%;
+}
+
+.cp-thumb {
+  position: absolute;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 3.5px var(--text),
+    0 2px 8px hsl(0 0% 0% / 0.3);
+  pointer-events: none;
+}
+
+.cp-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cp-row {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 10px;
+}
+
+.cp-label {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.cp-num {
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: right;
+}
+
+/* A slider's track: its gradient (--track), over a checkerboard for opacity. */
+.cp-track {
+  display: block;
+  height: 28px;
+  border-radius: 99px;
+  background: var(--track);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.cp-track.is-alpha,
+.cp-compare,
+.cp-recent-color {
+  --checker: repeating-conic-gradient(var(--surface) 0 25%, var(--hairline-strong) 0 50%) 0 0 / 12px 12px;
+}
+
+.cp-track.is-alpha {
+  background: var(--track), var(--checker);
+}
+
+.cp-range {
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.cp-range:focus-visible {
+  outline-offset: 3px;
+  border-radius: 99px;
+}
+
+.cp-range::-webkit-slider-runnable-track {
+  height: 100%;
+  background: transparent;
+  border: 0;
+}
+
+.cp-range::-moz-range-track {
+  height: 100%;
+  background: transparent;
+  border: 0;
+}
+
+.cp-range::-webkit-slider-thumb {
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--thumb);
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 3.5px var(--text);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.cp-range::-moz-range-thumb {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--thumb);
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 3.5px var(--text);
+}
+
+.cp-values {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Before and after, side by side. */
+.cp-compare {
+  display: flex;
+  flex: none;
+  width: 76px;
+  height: 44px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--checker);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.cp-compare > span {
+  flex: 1;
+  background: var(--swatch);
+}
+
+.cp-hex-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.cp-hex {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cp-hex[aria-invalid="true"] {
+  border-color: var(--bad);
+}
+
+.cp-recent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cp-recent-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.cp-recent-color {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(var(--swatch), var(--swatch)), var(--checker);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    outline-color var(--dur-fast) var(--ease-out);
+}
+
+.cp-recent-color:active {
+  transform: scale(0.9);
+}
+
+.cp-recent-color[aria-pressed="true"] {
+  outline-color: var(--text);
+}
+
+.cp-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}

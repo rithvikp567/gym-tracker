@@ -8,18 +8,14 @@ import { captureInstallPrompt } from "./ui/screens/settings/InstallCard";
 import "./ui/theme/tokens.css";
 import "./ui/theme/base.css";
 import "./ui/theme/app.css";
+import "./ui/theme/look.css";
 
 captureInstallPrompt();
 registerSW({ immediate: true });
 startHistory();
 
-// Apply the saved theme before first paint to avoid a flash.
-try {
-  const saved = JSON.parse(localStorage.getItem("gym-tracker.settings") ?? "{}") as { theme?: string };
-  if (saved.theme) document.documentElement.dataset.theme = saved.theme;
-} catch {
-  /* private mode */
-}
+// The saved look is painted before the first frame by index.html's head script; LookSync
+// (in App) takes over once the settings load.
 
 const root = createRoot(document.getElementById("root")!);
 
