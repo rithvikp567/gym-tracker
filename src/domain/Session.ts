@@ -1,5 +1,6 @@
 import { ExerciseLog, type ExerciseLogData } from "./ExerciseLog";
 import { EPOCH, type Syncable } from "./ids";
+import type { LoadUnit } from "./Load";
 import { LocalDate } from "./LocalDate";
 
 export interface SessionData extends Syncable {
@@ -62,13 +63,16 @@ export class Session {
 
   /**
    * Files `fromId`'s log under `intoId` (merging two exercises). If both were logged that day,
-   * the two logs become one.
+   * the two logs become one. `units` are the two exercises' units: the moved log keeps the unit
+   * its weights were saved in (given `from`'s if it had none; one without weights follows `into`),
+   * and weights in different units combine in pounds.
    */
-  mergeLogs(fromId: string, intoId: string): Session {
+  mergeLogs(fromId: string, intoId: string, units: { from: LoadUnit; into: LoadUnit }): Session {
     const from = this.log(fromId);
     if (!from || fromId === intoId) return this;
+    const moved = from.withExerciseId(intoId).withUnit(from.topWeight() === null ? undefined : from.unitOr(units.from));
     const into = this.log(intoId);
-    const merged = into ? into.mergedWith(from) : from.withExerciseId(intoId);
+    const merged = into ? into.mergedWith(moved, units.into) : moved;
     const others = this.logList.filter((l) => l.exerciseId !== fromId && l.exerciseId !== intoId);
     return new Session(this.data, [...others, merged]);
   }

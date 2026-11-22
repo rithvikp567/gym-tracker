@@ -1,5 +1,5 @@
 import { ExerciseLog } from "../domain/ExerciseLog";
-import type { LoadUnit } from "../domain/Load";
+import { platesToPounds, type LoadUnit } from "../domain/Load";
 import { LocalDate, type Weekday } from "../domain/LocalDate";
 import { Session } from "../domain/Session";
 import { SetEntry } from "../domain/SetEntry";
@@ -10,7 +10,15 @@ import type { Clock, Repositories } from "../services/ports";
  * Sample data for `?demo` (stored in memory only), so the screens can be previewed and
  * screenshotted without touching real data.
  */
-type DemoExercise = [name: string, sets: number, reps: string, start: number, step: number, extra?: { unit?: LoadUnit; retiredAfterWeek?: number }];
+type DemoExercise = [
+  name: string,
+  sets: number,
+  reps: string,
+  start: number,
+  step: number,
+  /** poundsUntilWeek: a plates exercise logged in pounds for its first weeks (saved with "lb" on each log). */
+  extra?: { unit?: LoadUnit; retiredAfterWeek?: number; poundsUntilWeek?: number },
+];
 
 const PLAN: { name: string; weekdays: Weekday[]; exercises: DemoExercise[] }[] = [
   {
@@ -34,7 +42,7 @@ const PLAN: { name: string; weekdays: Weekday[]; exercises: DemoExercise[] }[] =
       ["Squat", 3, "8", 240, 4],
       ["Ext", 3, "10", 265, 2],
       ["Curl", 3, "8", 140, 1.5],
-      ["Leg press", 2, "10", 2, 0.06, { unit: "plates" }],
+      ["Leg press", 2, "10", 2, 0.06, { unit: "plates", poundsUntilWeek: 6 }],
       ["Hack squat", 3, "8", 180, 3, { retiredAfterWeek: 8 }],
     ],
   },
@@ -92,11 +100,14 @@ export async function seedDemoData(repos: Repositories, clock: Clock): Promise<v
       const plan = PLAN.find((p) => p.name === day.name)!.exercises.find((e) => e[0] === ex.name)!;
       const [, sets, reps, base, step, extra] = plan;
       if (extra?.retiredAfterWeek !== undefined && weeks > extra.retiredAfterWeek) continue;
-      const round = extra?.unit === "plates" ? 0.5 : 2.5;
-      const weight = base ? Math.round((base + step * weeks + (random() - 0.5) * step * 2) / round) * round : null;
+      // Older demo logs carry no unit (they follow the exercise), like data saved before units were stored.
+      const inPounds = extra?.unit === "plates" && weeks < (extra.poundsUntilWeek ?? 0);
+      const round = extra?.unit === "plates" && !inPounds ? 0.5 : 2.5;
+      const value = base ? base + step * weeks + (random() - 0.5) * step * 2 : 0;
+      const weight = base ? Math.round((inPounds ? platesToPounds(value) : value) / round) * round : null;
       const target = Number(reps);
       const entries = Array.from({ length: sets }, (_, i) => new SetEntry(weight, Math.max(4, target - i + Math.round(random() * 2 - 1))));
-      let log = ExerciseLog.empty(ex.id).withSets(entries);
+      let log = ExerciseLog.empty(ex.id).withSets(entries).withUnit(inPounds ? "lb" : undefined);
       if (random() < 0.06) log = log.withNote("Last set was a grind, stay here next week");
       session = session.withLog(log);
     }

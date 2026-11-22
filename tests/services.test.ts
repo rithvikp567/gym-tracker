@@ -1,16 +1,19 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { MemoryRecordStore } from "../src/data/MemoryRecordStore";
+import { TABLES, type TableName } from "../src/data/RecordStore";
 import { StoreRepositories } from "../src/data/StoreRepositories";
 import { ExerciseLog } from "../src/domain/ExerciseLog";
-import { EPOCH } from "../src/domain/ids";
+import { EPOCH, type Syncable } from "../src/domain/ids";
+import type { LoadUnit } from "../src/domain/Load";
 import { LocalDate } from "../src/domain/LocalDate";
-import { Session } from "../src/domain/Session";
+import { Session, type SessionData } from "../src/domain/Session";
 import { SetEntry } from "../src/domain/SetEntry";
 import { Split } from "../src/domain/Split";
-import { WorkoutDay } from "../src/domain/WorkoutDay";
+import { WorkoutDay, type WorkoutDayData } from "../src/domain/WorkoutDay";
+import { BackupService } from "../src/services/BackupService";
 import { CalendarService } from "../src/services/CalendarService";
 import { ImportService } from "../src/services/ImportService";
-import type { ImportPlan } from "../src/services/ImportPlan";
+import type { ImportedLog, ImportPlan } from "../src/services/ImportPlan";
 import { ProgressService } from "../src/services/ProgressService";
 import { SessionService } from "../src/services/SessionService";
 import { SettingsService } from "../src/services/SettingsService";
@@ -164,34 +167,191 @@ describe("SetupService exercise management", () => {
     expect(history[0]!.logs.map((l) => l.exerciseId)).toEqual([squat.id]);
   });
 
+  /** The sheet's Lower day: "Leg Press (Plates)" now, "Legpress" an old name for it. */
+  const lowerSheet = (...days: [date: string, rows: ImportedLog[]][]): ImportPlan => ({
+    source: "test.xlsx",
+    split: [null, "Lower", null, null, null, null, null],
+    warnings: [],
+    skippedCopies: 0,
+    days: [
+      {
+        name: "Lower",
+        exercises: [
+          { key: "legpressplates", name: "Leg Press (Plates)", kind: "strength", targetSets: null, targetText: null, active: true },
+          { key: "legpress", name: "Legpress", kind: "strength", targetSets: null, targetText: null, active: false },
+        ],
+        sessions: days.map(([date, logs]) => ({ date, label: "Mar", logs })),
+      },
+    ],
+  });
+  const row = (key: string, weight: number, reps: number): ImportedLog => ({ key, sets: [{ weight, reps }], done: null, note: "" });
+  const sheet = lowerSheet(
+    ["2026-03-03", [row("legpress", 300, 10)]],
+    ["2026-03-10", [row("legpressplates", 2.5, 8), row("legpress", 310, 10)]],
+  );
+  const summaries = async (dayId: string, exerciseId: string, unit: LoadUnit = "lb") =>
+    (await sessions.history(dayId)).map((s) => [s.isoDate, s.log(exerciseId)?.summary(" · ", unit)]);
+
   it("keeps a merge when the sheet is imported again", async () => {
     const imports = new ImportService(repos);
-    const plan: ImportPlan = {
-      source: "test.xlsx",
-      split: [null, "Lower", null, null, null, null, null],
-      warnings: [],
-      skippedCopies: 0,
-      days: [
-        {
-          name: "Lower",
-          exercises: [
-            { key: "legpressplates", name: "Leg Press (Plates)", kind: "strength", targetSets: null, targetText: null, active: true },
-            { key: "legpress", name: "Legpress", kind: "strength", targetSets: null, targetText: null, active: false },
-          ],
-          sessions: [{ date: "2026-03-03", label: "Mar · week 1", logs: [{ key: "legpress", sets: [{ weight: 300, reps: 10 }], done: null, note: "" }] }],
-        },
-      ],
-    };
-    await imports.apply(plan);
+    await imports.apply(sheet);
     const day = (await setup.days())[0]!;
     const [press, oldPress] = day.allExercises();
     await setup.mergeExercise(day.id, oldPress!.id, press!.id);
+    const merged = [["2026-03-03", "300 · 10"], ["2026-03-10", "2.5/310 · 8/10"]];
+    expect(await summaries(day.id, press!.id)).toEqual(merged);
 
-    const again = await imports.apply(plan);
+    const again = await imports.apply(sheet);
     expect(again.exercisesCreated).toBe(0);
     const after = (await setup.days())[0]!;
     expect(after.allExercises().map((e) => e.name)).toEqual(["Leg Press (Plates)"]);
-    expect((await sessions.history(day.id))[0]!.log(press!.id)?.summary()).toBe("300 · 10");
+    // Both names logged on one date: both rows' sets, in the order the merge put them.
+    expect(await summaries(day.id, press!.id)).toEqual(merged);
+
+    // Still after renaming what was kept, even to the merged-away name.
+    for (const name of ["Leg Press Machine", "Leg Press"]) {
+      await setup.updateDay(day.id, (x) => x.withExercise(x.exercise(press!.id)!.renamed(name)));
+      expect((await imports.apply(sheet)).exercisesCreated).toBe(0);
+      expect(await summaries(day.id, press!.id)).toEqual(merged);
+    }
+  });
+
+  it("takes TASKS.md §8's order: plates names merged and switched first, then the pounds one", async () => {
+    const imports = new ImportService(repos);
+    const plan = lowerSheet(
+      ["2026-03-03", [row("legpressplates", 2.5, 8)]],
+      ["2026-03-10", [row("legpressbusyplates", 3, 8), row("legpress", 300, 10)]],
+      ["2026-03-17", [row("legpress", 310, 10)]],
+    );
+    plan.days[0]!.exercises.push({ key: "legpressbusyplates", name: "Leg Press (Busy)(Plates)", kind: "strength", targetSets: null, targetText: null, active: false });
+    await imports.apply(plan);
+    const day = (await setup.days())[0]!;
+    const byName = (name: string) => day.allExercises().find((e) => e.name === name)!;
+    const [press, busy, oldPress] = [byName("Leg Press (Plates)"), byName("Leg Press (Busy)(Plates)"), byName("Legpress")];
+    // Both "(Plates)" names hold plate counts, so they can merge first and switch together...
+    await setup.mergeExercise(day.id, busy.id, press.id);
+    expect(await setup.sessionsLoggedIn(day.id, press.id, "lb")).toBe(2);
+    await setup.setUnit(day.id, press.id, "plates", "relabel");
+    // ...and only then take in the name logged in pounds.
+    await setup.mergeExercise(day.id, oldPress.id, press.id);
+    const expected = [["2026-03-03", 230, "2.5 pl"], ["2026-03-10", 300, "300"], ["2026-03-17", 310, "310"]];
+    const points = async () =>
+      (await new ProgressService(repos, clock).lines(day.id, "ALL")).lines[0]!.points.map((p) => [p.date.toString(), p.weight, p.label]);
+    expect(await points()).toEqual(expected);
+    expect(await summaries(day.id, press.id, "plates")).toEqual([["2026-03-03", "2.5 pl · 8"], ["2026-03-10", "270/300 · 8/10"], ["2026-03-17", "310 · 10"]]);
+    await imports.apply(plan);
+    expect(await points()).toEqual(expected);
+  });
+
+  it("keeps plates as plates when the merged name only has a note that day", async () => {
+    const { day, press, oldPress } = await lowerWithPress();
+    await setup.setUnit(day.id, press.id, "plates", "relabel");
+    await sessions.saveLog(day.id, d("2026-10-13"), ExerciseLog.empty(press.id).withSets(sets(2.5, 10, 10)));
+    await sessions.saveLog(day.id, d("2026-10-13"), ExerciseLog.empty(oldPress.id).withNote("sled taken").withUnit("lb"));
+    await sessions.saveLog(day.id, d("2026-10-20"), ExerciseLog.empty(oldPress.id).withNote("no time").withUnit("lb"));
+    await setup.mergeExercise(day.id, oldPress.id, press.id);
+    const history = await sessions.history(day.id);
+    expect(history.map((s) => [s.log(press.id)?.summary(" · ", "plates"), s.log(press.id)?.unitOr("plates")])).toEqual([
+      ["2.5 pl · 10/10", "plates"],
+      ["", "plates"], // a note alone: typed weights will be plates, like the rest
+    ]);
+  });
+
+  it("re-imports each name's rows in the unit it was logged in", async () => {
+    // TASKS.md §8: set the "(Plates)" leg press to plates, then merge the pounds one into it.
+    const imports = new ImportService(repos);
+    await imports.apply(sheet);
+    const day = (await setup.days())[0]!;
+    const [press, oldPress] = day.allExercises();
+    await setup.setUnit(day.id, press!.id, "plates", "relabel");
+    await setup.mergeExercise(day.id, oldPress!.id, press!.id);
+    const merged = [["2026-03-03", "300 · 10"], ["2026-03-10", "230/310 · 8/10"]]; // pounds stay pounds; 2.5 pl = 230 lb
+    expect(await summaries(day.id, press!.id, "plates")).toEqual(merged);
+
+    await imports.apply(sheet);
+    expect(await summaries(day.id, press!.id, "plates")).toEqual(merged);
+    const [line] = (await new ProgressService(repos, clock).lines(day.id, "ALL")).lines;
+    expect(line!.points.map((p) => p.weight)).toEqual([300, 310]); // not 27,000 lb
+  });
+
+  it("re-imports rows in pounds after switching to plates with \"keep those in pounds\"", async () => {
+    const imports = new ImportService(repos);
+    const plan = lowerSheet(["2026-03-03", [row("legpressplates", 360, 10)]]);
+    await imports.apply(plan);
+    const day = (await setup.days())[0]!;
+    const press = day.activeExercises()[0]!;
+    await setup.setUnit(day.id, press.id, "plates", "keep");
+    await imports.apply(plan);
+    expect(await summaries(day.id, press.id, "plates")).toEqual([["2026-03-03", "360 · 10"]]);
+  });
+});
+
+describe("Units per log", () => {
+  async function legPress() {
+    let day = await setup.createDay("Lower");
+    day = (await setup.updateDay(day.id, (x) => x.addExercise("Leg press")))!;
+    return { day, press: day.activeExercises()[0]! };
+  }
+  const points = async (dayId: string) =>
+    (await new ProgressService(repos, clock).lines(dayId, "ALL")).lines[0]!.points.map((p) => [p.date.toString(), p.weight, p.label]);
+
+  it("switching to plates leaves earlier pounds in pounds", async () => {
+    const { day, press } = await legPress();
+    // Saved before units were stored (no unit on the log), like every log so far.
+    await sessions.saveLog(day.id, d("2026-11-10"), ExerciseLog.empty(press.id).withSets(sets(360, 10)));
+    expect(await setup.sessionsLoggedIn(day.id, press.id, "lb")).toBe(1);
+    await setup.setUnit(day.id, press.id, "plates", "keep");
+    expect(await setup.sessionsLoggedIn(day.id, press.id, "lb")).toBe(1);
+    await sessions.saveLog(day.id, d("2026-11-17"), ExerciseLog.empty(press.id).withSets(sets(4, 8)).withUnit("plates"));
+
+    expect(await points(day.id)).toEqual([["2026-11-10", 360, "360"], ["2026-11-17", 360, "4 pl"]]);
+    // The row's "Last: 360 – 10" (not "360 pl").
+    const last = await sessions.lastResultsBefore(day.id, d("2026-11-17"));
+    expect(last.get(press.id)?.log.summary(" – ", "plates")).toBe("360 – 10");
+
+    // And back to pounds: the plates day stays plates.
+    expect(await setup.sessionsLoggedIn(day.id, press.id, "plates")).toBe(1);
+    await setup.setUnit(day.id, press.id, "lb", "keep");
+    expect(await points(day.id)).toEqual([["2026-11-10", 360, "360"], ["2026-11-17", 360, "4 pl"]]);
+  });
+
+  it("relabels earlier sessions that were plates all along", async () => {
+    const { day, press } = await legPress();
+    await sessions.saveLog(day.id, d("2026-11-10"), ExerciseLog.empty(press.id).withSets(sets(2.5, 10))); // an imported "(Plates)" row
+    await sessions.saveLog(day.id, d("2026-11-11"), ExerciseLog.empty(press.id).withNote("sled taken")); // no weights: nothing to ask about
+    expect(await setup.sessionsLoggedIn(day.id, press.id, "lb")).toBe(1);
+    await setup.setUnit(day.id, press.id, "plates", "relabel");
+    expect(await points(day.id)).toEqual([["2026-11-10", 230, "2.5 pl"]]);
+    expect(await setup.sessionsLoggedIn(day.id, press.id, "lb")).toBe(0);
+  });
+
+  it("fixes a wrong \"keep\" by switching back and answering \"those were plates\"", async () => {
+    const { day, press } = await legPress();
+    await sessions.saveLog(day.id, d("2026-11-10"), ExerciseLog.empty(press.id).withSets(sets(2.5, 10)));
+    await setup.setUnit(day.id, press.id, "plates", "keep"); // oops: those were plates
+    expect(await points(day.id)).toEqual([["2026-11-10", 2.5, "2.5"]]);
+    expect(await setup.sessionsLoggedIn(day.id, press.id, "plates")).toBe(0); // so switching back doesn't ask
+    await setup.setUnit(day.id, press.id, "lb", "relabel");
+    expect(await setup.sessionsLoggedIn(day.id, press.id, "lb")).toBe(1);
+    await setup.setUnit(day.id, press.id, "plates", "relabel");
+    expect(await points(day.id)).toEqual([["2026-11-10", 230, "2.5 pl"]]);
+  });
+
+  it("merges across units without mixing them", async () => {
+    let day = await setup.createDay("Lower");
+    day = (await setup.updateDay(day.id, (x) => x.addExercise("Leg Press (Plates)").addExercise("Legpress")))!;
+    const [press, oldPress] = day.allExercises();
+    await sessions.saveLog(day.id, d("2026-10-06"), ExerciseLog.empty(oldPress!.id).withSets(sets(300, 10)));
+    await sessions.saveLog(day.id, d("2026-10-13"), ExerciseLog.empty(oldPress!.id).withSets(sets(310, 8)));
+    await sessions.saveLog(day.id, d("2026-10-13"), ExerciseLog.empty(press!.id).withSets(sets(2.5, 10)));
+    await setup.setUnit(day.id, press!.id, "plates", "relabel");
+    await setup.mergeExercise(day.id, oldPress!.id, press!.id);
+
+    expect(await points(day.id)).toEqual([["2026-10-06", 300, "300"], ["2026-10-13", 310, "310"]]);
+    const history = await sessions.history(day.id);
+    expect(history.map((s) => s.log(press!.id)?.summary(" · ", "plates"))).toEqual(["300 · 10", "230/310 · 10/8"]);
+    // Switching the merged exercise later only asks about what's really in its unit.
+    expect(await setup.sessionsLoggedIn(day.id, press!.id, "plates")).toBe(0);
   });
 });
 
@@ -256,6 +416,249 @@ describe("ImportService", () => {
     expect(days[0]!.activeExercises().map((e) => e.name)).toEqual(["Pulldown"]);
     expect(await repos.sessions.all()).toHaveLength(1);
     expect((await setup.split()).plannedOn(0)).toBe(days[0]!.id);
+  });
+});
+
+describe("Logs that sync in after a merge or delete", () => {
+  interface Device {
+    store: MemoryRecordStore;
+    repos: StoreRepositories;
+    setup: SetupService;
+    sessions: SessionService;
+  }
+  let now: number;
+  const worldClock: Clock = { now: () => new Date(now) };
+  /**
+   * Stand-in for Supabase: an upload replaces the server's copy unless it is older (the keep_newest
+   * trigger), and a download replaces the device's copy only when it is newer (SupabaseSync.apply).
+   */
+  let server: Map<string, { table: TableName; record: Syncable }>;
+
+  beforeEach(() => {
+    now = Date.parse("2026-11-18T08:00:00.000Z");
+    server = new Map();
+  });
+
+  function device(): Device {
+    const store = new MemoryRecordStore();
+    const repos = new StoreRepositories(store, worldClock);
+    return { store, repos, setup: new SetupService(repos), sessions: new SessionService(repos) };
+  }
+
+  /** Push this device's outbox, then pull what's newer, the way SupabaseSync does. A minute passes. */
+  async function sync({ store }: Device): Promise<void> {
+    const outbox = await store.outbox();
+    for (const entry of outbox) {
+      const record = await store.get(entry.table, entry.id);
+      const held = server.get(`${entry.table}/${entry.id}`);
+      if (record && (!held || Date.parse(record.updatedAt) >= Date.parse(held.record.updatedAt))) {
+        server.set(`${entry.table}/${entry.id}`, { table: entry.table, record: structuredClone(record) });
+      }
+    }
+    await store.clearOutbox(outbox);
+    for (const table of TABLES) {
+      const newer: Syncable[] = [];
+      for (const { table: t, record } of server.values()) {
+        const local = t === table ? await store.get(table, record.id) : null;
+        if (t === table && (!local || Date.parse(record.updatedAt) > Date.parse(local.updatedAt))) newer.push(structuredClone(record));
+      }
+      if (newer.length) await store.putMany(table, newer, "remote");
+    }
+    now += 60_000;
+  }
+
+  async function lowerOnBoth(...names: string[]) {
+    const desktop = device();
+    const phone = device();
+    let day = await desktop.setup.createDay("Lower");
+    day = (await desktop.setup.updateDay(day.id, (x) => names.reduce((acc, name) => acc.addExercise(name), x)))!;
+    await sync(desktop);
+    await sync(phone);
+    return { desktop, phone, day, exercises: day.allExercises() };
+  }
+
+  it("files a log saved on another device before it heard about a merge", async () => {
+    const { desktop, phone, day, exercises } = await lowerOnBoth("Leg Press", "Legpress");
+    const [press, oldPress] = exercises;
+    await desktop.sessions.saveLog(day.id, d("2026-11-17"), ExerciseLog.empty(press!.id).withSets(sets(310, 8)));
+    // Offline at the gym, the phone logs the old name while the desktop merges it away.
+    await phone.sessions.saveLog(day.id, d("2026-11-18"), ExerciseLog.empty(oldPress!.id).withSets(sets(320, 10)));
+    now += 60_000;
+    await desktop.setup.mergeExercise(day.id, oldPress!.id, press!.id);
+    await sync(desktop);
+    await sync(phone);
+    await sync(desktop);
+
+    // Left alone, the log points at nothing: invisible, yet the day counts as a workout.
+    expect((await desktop.sessions.find(day.id, d("2026-11-18")))?.logs.map((l) => l.exerciseId)).toEqual([oldPress!.id]);
+
+    for (const dev of [desktop, phone]) expect(await dev.setup.reconcile()).toBe(1);
+    for (const dev of [desktop, phone]) {
+      const late = await dev.sessions.find(day.id, d("2026-11-18"));
+      expect(late?.logs.map((l) => [l.exerciseId, l.summary()])).toEqual([[press!.id, "320 · 10"]]);
+      const [line] = (await new ProgressService(dev.repos, clock).lines(day.id, "1M")).lines;
+      expect(line!.points.map((p) => p.weight)).toEqual([310, 320]);
+    }
+
+    // The repairs sync without ping-pong: once both have each other's copy, nothing is left to do.
+    await sync(desktop);
+    await sync(phone);
+    await sync(desktop);
+    for (const dev of [desktop, phone]) {
+      expect(await dev.setup.reconcile()).toBe(0);
+      expect(await dev.store.outbox()).toEqual([]);
+    }
+  });
+
+  it("drops a log saved on another device before it heard about a delete", async () => {
+    const { desktop, phone, day, exercises } = await lowerOnBoth("Legpress", "Squat");
+    const [oldPress, squat] = exercises;
+    await phone.sessions.saveLog(day.id, d("2026-11-18"), ExerciseLog.empty(oldPress!.id).withSets(sets(320, 10)));
+    await phone.sessions.saveLog(day.id, d("2026-11-19"), ExerciseLog.empty(oldPress!.id).withSets(sets(320, 10)));
+    await phone.sessions.saveLog(day.id, d("2026-11-19"), ExerciseLog.empty(squat!.id).withSets(sets(225, 5)));
+    now += 60_000;
+    await desktop.setup.deleteExercise(day.id, oldPress!.id);
+    await sync(desktop);
+    await sync(phone);
+    await sync(desktop);
+
+    for (const dev of [desktop, phone]) {
+      expect(await dev.setup.reconcile()).toBe(2);
+      // The day that only had the deleted exercise is gone (no green dot); the other keeps its squat.
+      const history = await dev.sessions.history(day.id);
+      expect(history.map((s) => [s.isoDate, s.logs.map((l) => l.exerciseId)])).toEqual([["2026-11-19", [squat!.id]]]);
+      const [nov18] = await new CalendarService(dev.repos, clock).range(d("2026-11-18"), d("2026-11-18"));
+      expect(nov18!.status).toBe("rest");
+      expect(await dev.setup.reconcile()).toBe(0);
+    }
+  });
+
+  it("never lets a repair made elsewhere beat edits made after the copy it repaired", async () => {
+    const { desktop, phone, day, exercises } = await lowerOnBoth("Leg Press", "Legpress", "Squat");
+    const [press, oldPress, squat] = exercises;
+    const date = d("2026-11-18");
+    // The desktop merges the old name away; at the gym the phone hasn't heard and logs it.
+    await desktop.setup.mergeExercise(day.id, oldPress!.id, press!.id);
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(oldPress!.id).withSets(sets(320, 10)));
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(squat!.id).withSets(sets(225, 5)));
+    await sync(desktop);
+    // A moment of signal: the phone uploads that copy, hears about the merge and files its log,
+    // then loses signal before the repair goes up and logs more sets (the app is suspended after).
+    await sync(phone);
+    expect(await phone.setup.reconcile()).toBe(1);
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(press!.id).withSets(sets(320, 10, 8)));
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(squat!.id).withSets(sets(225, 5, 5)));
+    // Hours later the desktop downloads the phone's first copy and repairs it too.
+    now += 2 * 3_600_000;
+    await sync(desktop);
+    expect(await desktop.setup.reconcile()).toBe(1);
+    await sync(desktop);
+    // When the phone is back, its later copy wins on both devices.
+    await sync(phone);
+    await sync(desktop);
+    for (const dev of [desktop, phone]) {
+      const session = await dev.sessions.find(day.id, date);
+      const summaries = new Map(session?.logs.map((l) => [l.exerciseId, l.summary()]));
+      expect(summaries).toEqual(new Map([[press!.id, "320 · 10/8"], [squat!.id, "225 · 5/5"]]));
+      expect(await dev.setup.reconcile()).toBe(0);
+    }
+  });
+
+  it("drops an open editor's last save for a merged-away exercise once its log was filed", async () => {
+    const { desktop, phone, day, exercises } = await lowerOnBoth("Leg Press", "Legpress");
+    const [press, oldPress] = exercises;
+    const date = d("2026-11-18");
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(oldPress!.id).withSets(sets(320, 10)));
+    await desktop.setup.mergeExercise(day.id, oldPress!.id, press!.id);
+    await sync(desktop);
+    await sync(phone); // the merge arrives while the phone's Legpress row is open
+    const logs = async () => (await phone.sessions.find(day.id, date))?.logs.map((l) => [l.exerciseId, l.summary()]);
+
+    // A save before the log is filed replaces it, and is filed once.
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(oldPress!.id).withSets(sets(320, 10, 8)));
+    expect(await phone.setup.reconcile()).toBe(1);
+    expect(await logs()).toEqual([[press!.id, "320 · 10/8"]]);
+    // The row is gone now; its editor flushes the draft it held as it closes. Nothing is filed twice.
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(oldPress!.id).withSets(sets(320, 10, 8, 6)));
+    expect(await phone.setup.reconcile()).toBe(0);
+    expect(await logs()).toEqual([[press!.id, "320 · 10/8"]]);
+  });
+
+  it("follows merges of merges and keeps a late log's unit", async () => {
+    let day = await setup.createDay("Lower");
+    day = (await setup.updateDay(day.id, (x) => x.addExercise("Sled").addExercise("Legpress").addExercise("Leg Press")))!;
+    const [sled, oldPress, press] = day.allExercises();
+    await setup.setUnit(day.id, sled!.id, "plates", "relabel");
+    await sessions.saveLog(day.id, d("2026-11-17"), ExerciseLog.empty(press!.id).withSets(sets(300, 10)));
+    await setup.mergeExercise(day.id, sled!.id, oldPress!.id);
+    await setup.mergeExercise(day.id, oldPress!.id, press!.id);
+
+    // A newer copy of the day arrives from a phone that logged the sled (in plates, with no unit saved).
+    const late = (await sessions.find(day.id, d("2026-11-17")))!
+      .withLog(ExerciseLog.empty(sled!.id).withSets(sets(2.5, 8)))
+      .withUpdatedAt("2026-11-21T00:00:00.000Z");
+    await store.putMany("sessions", [late.toJSON()], "remote");
+
+    expect(await setup.reconcile()).toBe(1);
+    const log = (await sessions.find(day.id, d("2026-11-17")))!.log(press!.id)!;
+    expect([log.unit, log.summary()]).toEqual(["lb", "300/230 · 10/8"]); // 2.5 pl = 230 lb
+    expect(await setup.reconcile()).toBe(0);
+  });
+
+  it("leaves logs it can't place, and returns at once when nothing was merged or deleted", async () => {
+    const { day, pull } = await upperDay();
+    await sessions.saveLog(day.id, d("2026-11-16"), ExerciseLog.empty(pull.id).withSets(sets(150, 8)));
+    const before = await store.outbox();
+    expect(await setup.reconcile()).toBe(0);
+    expect(await store.outbox()).toEqual(before);
+
+    // Two merges pointing at each other (hand-made data): no safe answer, so a log that syncs in stays.
+    await repos.days.save(WorkoutDay.from({ ...day.toJSON(), retired: [{ id: "x", mergedInto: "y" }, { id: "y", mergedInto: "x" }] }));
+    const late = (await sessions.find(day.id, d("2026-11-16")))!.withLog(ExerciseLog.empty("x").withSets(sets(100, 5)));
+    await store.putMany("sessions", [late.withUpdatedAt("2026-11-21T00:00:00.000Z").toJSON()], "remote");
+    expect(await setup.reconcile()).toBe(0);
+    expect((await sessions.find(day.id, d("2026-11-16")))?.log("x")?.summary()).toBe("100 · 5");
+  });
+
+  it("brings a deleted exercise back from the sheet as a new one that its tombstone never touches", async () => {
+    const imports = new ImportService(repos);
+    const plan: ImportPlan = {
+      source: "test.xlsx",
+      split: [null, null, null, null, null, null, null],
+      warnings: [],
+      skippedCopies: 0,
+      days: [
+        {
+          name: "Lower",
+          exercises: [{ key: "legpress", name: "Legpress", kind: "strength", targetSets: null, targetText: null, active: true }],
+          sessions: [{ date: "2026-03-03", label: "Mar", logs: [{ key: "legpress", sets: [{ weight: 300, reps: 10 }], done: null, note: "" }] }],
+        },
+      ],
+    };
+    await imports.apply(plan);
+    const day = (await setup.days())[0]!;
+    const gone = day.activeExercises()[0]!;
+    await setup.deleteExercise(day.id, gone.id);
+    expect(await sessions.history(day.id)).toEqual([]);
+
+    expect((await imports.apply(plan)).exercisesCreated).toBe(1);
+    const back = (await setup.days())[0]!.activeExercises()[0]!;
+    expect(back.id).not.toBe(gone.id);
+    expect(await setup.reconcile()).toBe(0);
+    expect((await sessions.history(day.id)).map((s) => s.log(back.id)?.summary())).toEqual(["300 · 10"]);
+  });
+});
+
+describe("BackupService", () => {
+  it("exports each log's unit and the merged and deleted exercises", async () => {
+    const { day, pull, tri } = await upperDay();
+    await sessions.saveLog(day.id, d("2026-11-16"), ExerciseLog.empty(pull.id).withSets(sets(150, 8)));
+    await setup.setUnit(day.id, pull.id, "plates", "keep");
+    await setup.deleteExercise(day.id, tri.id);
+    const backup = JSON.parse(await new BackupService(repos).exportJson()) as { workoutDays: WorkoutDayData[]; sessions: SessionData[] };
+    expect(backup.sessions[0]!.logs[0]).toMatchObject({ exerciseId: pull.id, unit: "lb" });
+    expect(backup.workoutDays[0]!.retired).toEqual([{ id: tri.id }]);
+    expect(backup.workoutDays[0]!.exercises[0]).toMatchObject({ unit: "plates", keyUnits: { pulldown: "lb" } });
   });
 });
 

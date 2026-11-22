@@ -1384,6 +1384,15 @@ details > summary {
   cursor: pointer;
 }
 
+/* Switching units with sessions logged: the question takes the menu's first line, chips answer it. */
+.unit-ask {
+  flex-basis: 100%;
+  margin: 0 0 2px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+
 /* Name reads as plain text until you tap it. */
 .field.quiet {
   background: transparent;

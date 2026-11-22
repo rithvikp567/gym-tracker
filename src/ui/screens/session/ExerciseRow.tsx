@@ -26,6 +26,8 @@ export function ExerciseRow({ exercise, log, last, showLast, open, onToggle, not
   const note = log?.note.trim() ?? "";
   const isCheck = exercise.kind === "check";
 
+  // Each log is labeled in the unit it was saved in ("360" stays pounds after a switch to plates);
+  // exercise.unit only covers logs saved without one.
   const value = isCheck
     ? log?.done === true
       ? "Done"

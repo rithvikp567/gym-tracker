@@ -3,7 +3,7 @@ import { ExerciseLog } from "../domain/ExerciseLog";
 import { LocalDate, type Weekday } from "../domain/LocalDate";
 import { Session } from "../domain/Session";
 import { WorkoutDay } from "../domain/WorkoutDay";
-import type { ImportPlan } from "./ImportPlan";
+import type { ImportedLog, ImportPlan } from "./ImportPlan";
 import type { Repositories } from "./ports";
 
 export interface ImportResult {
@@ -15,6 +15,8 @@ export interface ImportResult {
 /**
  * Writes an ImportPlan into storage. Safe to run again: days match by name, exercises by
  * name key, and sessions by (day, date), so re-importing updates instead of duplicating.
+ * Rows are read in the unit their name was logged in (Exercise.unitOf), so a unit switch or a
+ * merge across units holds up when the sheet comes in again.
  */
 export class ImportService {
   constructor(private readonly repos: Repositories) {}
@@ -48,12 +50,28 @@ export class ImportService {
       savedDays.push(day);
       dayIdByName.set(imported.name, day.id);
 
+      // Rows that land on one exercise on one date (an exercise and one merged into it) combine
+      // into one log: its own names' rows first, then merged names in the order they were merged
+      // (Exercise.rowOrder), as SetupService.mergeExercise combines them. Each row is read in its
+      // name's unit.
+      const rowsByDate = new Map<string, { exercise: Exercise; row: ImportedLog }[]>();
       for (const s of imported.sessions) {
-        let session = Session.start(day.id, LocalDate.parse(s.date));
-        for (const log of s.logs) {
-          const exercise = day.exerciseByKey(log.key);
-          if (!exercise) continue;
-          session = session.withLog(ExerciseLog.from({ exerciseId: exercise.id, sets: log.sets, done: log.done, note: log.note }));
+        const rows = rowsByDate.get(s.date) ?? [];
+        for (const row of s.logs) {
+          const exercise = day.exerciseByKey(row.key);
+          if (exercise) rows.push({ exercise, row });
+        }
+        rowsByDate.set(s.date, rows);
+      }
+      for (const [date, rows] of rowsByDate) {
+        let session = Session.start(day.id, LocalDate.parse(date));
+        for (const { exercise, row } of rows.sort((a, b) => a.exercise.rowOrder(a.row.key) - b.exercise.rowOrder(b.row.key))) {
+          const unit = exercise.unitOf(row.key);
+          const incoming = ExerciseLog.from({ exerciseId: exercise.id, sets: row.sets, done: row.done, note: row.note }).withUnit(
+            unit === exercise.unit ? undefined : unit,
+          );
+          const prev = session.log(exercise.id);
+          session = session.withLog(prev ? prev.mergedWith(incoming, exercise.unit) : incoming);
         }
         if (session.hasContent()) sessions.push(session);
       }

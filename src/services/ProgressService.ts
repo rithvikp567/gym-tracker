@@ -74,13 +74,15 @@ export class ProgressService {
         const log = s.log(exercise.id);
         const top = log?.topWeight() ?? null;
         if (!log || top === null) continue;
-        if (exercise.unit === "plates") {
+        // Each session in the unit it was saved in, so a unit switch doesn't rewrite history.
+        const unit = log.unitOr(exercise.unit);
+        if (unit === "plates") {
           const pounds = platesToPounds(top);
           const reps = log.repsLabel();
-          const summary = `${log.weightLabel("plates")} (${formatNumber(pounds)} lb)${reps ? ` · ${reps}` : ""}`;
+          const summary = `${log.weightLabel(unit)} (${formatNumber(pounds)} lb)${reps ? ` · ${reps}` : ""}`;
           points.push({ date: s.date, weight: pounds, label: formatLoad(top, "plates"), summary });
         } else {
-          points.push({ date: s.date, weight: top, label: formatLoad(top, "lb"), summary: log.summary() });
+          points.push({ date: s.date, weight: top, label: formatLoad(top, "lb"), summary: log.summary(" · ", unit) });
         }
       }
       if (points.length) lines.push({ exercise, points });
