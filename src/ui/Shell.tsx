@@ -1,38 +1,102 @@
-import type { ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { CenterPage } from "./components/CenterBlock";
 import { Icon, type IconName } from "./components/Icon";
+import { pageOf, tabOf, type TabName } from "./pageLayout";
 import { href, type Route } from "./router";
 
-const TABS: { name: Route["name"]; label: string; icon: IconName; to: Route }[] = [
+const TABS: { name: TabName; label: string; icon: IconName; to: Route }[] = [
   { name: "home", label: "Home", icon: "home", to: { name: "home" } },
   { name: "calendar", label: "Calendar", icon: "calendar", to: { name: "calendar", year: null } },
   { name: "progress", label: "Progress", icon: "chart", to: { name: "progress", dayId: null } },
   { name: "settings", label: "Settings", icon: "settings", to: { name: "settings" } },
 ];
 
-/** Which tab a route belongs to (a session or rest day lives under Home, setup under Settings). */
-function tabOf(route: Route): Route["name"] {
-  if (route.name === "session" || route.name === "day") return "home";
-  if (route.name === "setup" || route.name === "import") return "settings";
-  return route.name;
-}
-
+/**
+ * Phone: the page, with the tab bar floating over the bottom as a rounded tile. Computer: two
+ * rounded panels, the rail (Gym Tracker, then the four tabs as square tiles down its length) and
+ * the main area. Either way the page's content is centered in its space.
+ */
 export function Shell({ route, children }: { route: Route; children: ReactNode }) {
-  const active = tabOf(route);
+  const page = pageOf(route);
+  // The first page just appears; every page after it fades in.
+  const [firstPage] = useState(page);
+  const [moved, setMoved] = useState(false);
+  if (!moved && page !== firstPage) setMoved(true);
+
+  // iPhone Safari only shows :active (the tiles' press feedback) once something listens for touches.
+  useEffect(() => {
+    const noop = () => {};
+    document.addEventListener("touchstart", noop, { passive: true });
+    return () => document.removeEventListener("touchstart", noop);
+  }, []);
+
   return (
     <div className="shell">
       <nav className="tabbar" aria-label="Main">
         <div className="brand">
-          <Icon name="barbell" />
-          Gym Tracker
+          <Icon name="barbell" size={24} />
+          <span>Gym Tracker</span>
         </div>
-        {TABS.map((t) => (
-          <a key={t.name} className="tab" href={href(t.to)} aria-current={active === t.name ? "page" : undefined}>
-            <Icon name={t.icon} />
-            {t.label}
-          </a>
-        ))}
+        <TabTiles active={tabOf(route)} />
       </nav>
-      <main className="shell-main">{children}</main>
+      <main className="shell-main">
+        <CenterPage key={page} page={page} enter={moved}>
+          {children}
+        </CenterPage>
+      </main>
+    </div>
+  );
+}
+
+/**
+ * The four tabs, with one marker (accent fill and outline) that moves to the current tab, so a
+ * tab switch shows where you went. Placed from the tiles' own boxes, so it follows any layout.
+ */
+function TabTiles({ active }: { active: TabName }) {
+  const box = useRef<HTMLDivElement>(null);
+  const marker = useRef<HTMLSpanElement>(null);
+  const placed = useRef(false);
+
+  useLayoutEffect(() => {
+    const container = box.current;
+    const m = marker.current;
+    if (!container || !m) return;
+    const place = (animate: boolean) => {
+      const tile = container.querySelector<HTMLElement>('[aria-current="page"]');
+      if (!tile) return;
+      // Only a tab switch glides; the first placement and a resize (window, phone ↔ rail) jump.
+      m.dataset.glide = animate ? "true" : "false";
+      m.style.width = `${tile.offsetWidth}px`;
+      m.style.height = `${tile.offsetHeight}px`;
+      m.style.transform = `translate(${tile.offsetLeft}px, ${tile.offsetTop}px)`;
+      m.dataset.shown = "true";
+    };
+    place(placed.current);
+    placed.current = true;
+    // Only a real resize re-places it (the observer also reports once on start, which would cut
+    // the glide that just began short).
+    const sizeOf = () => `${container.clientWidth}x${container.clientHeight}`;
+    let size = sizeOf();
+    const observer = new ResizeObserver(() => {
+      if (sizeOf() === size) return;
+      size = sizeOf();
+      place(false);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [active]);
+
+  return (
+    <div className="tabs" ref={box}>
+      <span className="tab-marker" ref={marker} aria-hidden />
+      {TABS.map((t) => (
+        <a key={t.name} className="tab" href={href(t.to)} aria-current={active === t.name ? "page" : undefined}>
+          <span className="tab-face">
+            <Icon name={t.icon} />
+            <span className="tab-label">{t.label}</span>
+          </span>
+        </a>
+      ))}
     </div>
   );
 }

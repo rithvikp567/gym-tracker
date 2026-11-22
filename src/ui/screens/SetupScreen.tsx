@@ -4,6 +4,7 @@ import { unitName, type LoadUnit } from "../../domain/Load";
 import { WEEKDAY_SHORT, type Weekday } from "../../domain/LocalDate";
 import type { Split } from "../../domain/Split";
 import type { WorkoutDay } from "../../domain/WorkoutDay";
+import { usePageHold } from "../components/CenterBlock";
 import { Icon } from "../components/Icon";
 import { BackLink, ScreenHead } from "../components/controls";
 import { useLive, useServices } from "../ServicesContext";
@@ -21,6 +22,8 @@ export function SetupScreen({ openDayId }: { openDayId?: string | undefined }) {
   const data = useLive(async () => ({ days: await setup.days(), split: await setup.split() }), [], "setup");
   const [newDay, setNewDay] = useState("");
   const [openIds, setOpenIds] = useState<ReadonlySet<string>>(() => new Set(openDayId ? [openDayId] : []));
+  // The page is centered: while a day is open it holds its place, so the card you tapped stays put as it grows.
+  usePageHold(openIds.size > 0);
 
   // Coming from another screen to edit one day: bring its card into view.
   const ready = Boolean(data);

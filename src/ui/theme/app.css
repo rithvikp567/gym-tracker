@@ -1,61 +1,85 @@
-/* ───────────── Shell: bottom tab bar on phones, left rail on desktop ───────────── */
+/*
+ * Rounded tiles: the window's background, then (on a computer) two rounded panels, the rail and
+ * the main area; everything on a page sits on tiles (`.tile`, `.card`, list rows). Colors come
+ * from tokens.css only (`--panel`, `--tile`, `--tile-line`, `--accent-line`…); the layout values
+ * that aren't tokens live here.
+ */
+:root {
+  /* The floating tab bar sits just above the iPhone's home bar, or a gap from the bottom edge. */
+  --tabbar-bottom: max(var(--tile-gap), calc(env(safe-area-inset-bottom) - 10px));
+  /* Space between rows that are tiles of their own (Home's workouts, Settings' links). */
+  --row-tile-gap: 8px;
+}
+
+/* ───────────── Shell: floating tab bar on phones, rail and main panels on a computer ───────────── */
 
 .shell {
   min-height: 100dvh;
 }
 
 .shell-main {
-  --main-pad-top: calc(env(safe-area-inset-top) + 14px);
-  --main-pad-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 28px);
+  --main-pad-top: calc(env(safe-area-inset-top) + 16px);
+  --main-pad-bottom: calc(var(--tabbar-h) + var(--tabbar-bottom) + 16px);
+  max-width: 760px;
+  margin: 0 auto;
   padding: var(--main-pad-top) calc(var(--gutter) + env(safe-area-inset-right)) var(--main-pad-bottom)
     calc(var(--gutter) + env(safe-area-inset-left));
-  max-width: 720px;
-  margin: 0 auto;
 }
 
-/* A page as tall as the visible area, so a CenterBlock at its end can center in what's left. */
-.page-fill {
-  display: flex;
-  flex-direction: column;
-  min-height: calc(100dvh - var(--main-pad-top) - var(--main-pad-bottom));
-}
-
-/* The part of a screen below its header, centered vertically in the space that's left. */
-.center-block {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-height: 0;
-}
-
-/* Held (a row is open): stays where it was and grows downward instead of re-centering. */
-.center-block.is-held {
-  justify-content: flex-start;
-}
-
+/* Phone: a rounded tile floating over the bottom of the page, the four tabs spread across it. */
 .tabbar {
   position: fixed;
-  inset: auto 0 0 0;
   z-index: 20;
+  left: 0;
+  right: 0;
+  bottom: var(--tabbar-bottom);
+  width: min(520px, calc(100% - 2 * var(--gutter) - env(safe-area-inset-left) - env(safe-area-inset-right)));
+  height: var(--tabbar-h);
+  margin-inline: auto;
+  padding: 5px;
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--panel-radius);
+}
+
+.brand {
+  display: none;
+}
+
+.tabs {
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
-  padding-bottom: env(safe-area-inset-bottom);
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-top: 0.5px solid var(--hairline);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  height: 100%;
 }
 
 .tab {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  border-radius: calc(var(--panel-radius) - 6px);
+  color: var(--text-2);
+  transition: color var(--dur) ease-out, background-color var(--dur-fast) ease-out;
+}
+
+.tab-face {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 3px;
+  gap: 2px;
   font-size: 11px;
-  color: var(--text-3);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.tab:active .tab-face {
+  transform: scale(0.92);
+}
+
+.tab svg {
+  transition: color var(--dur) ease-out;
 }
 
 .tab[aria-current="page"] {
@@ -66,80 +90,209 @@
   color: var(--accent);
 }
 
-.brand {
-  display: none;
+/* The current tab's mark: one element that glides to whichever tab is current (Shell places it). */
+.tab-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: calc(var(--panel-radius) - 6px);
+  opacity: 0;
+}
+
+.tab-marker[data-shown] {
+  opacity: 1;
+}
+
+.tab-marker[data-glide="true"] {
+  transition:
+    transform var(--dur) var(--ease-out),
+    width var(--dur) var(--ease-out),
+    height var(--dur) var(--ease-out);
 }
 
 @media (min-width: 900px) {
   .shell {
     display: grid;
-    grid-template-columns: var(--rail-w) 1fr;
+    grid-template-columns: var(--rail-w) minmax(0, 1fr);
+    gap: var(--tile-gap);
+    padding: var(--tile-gap) max(var(--tile-gap), env(safe-area-inset-right)) var(--tile-gap) max(var(--tile-gap), env(safe-area-inset-left));
   }
 
+  /* The rail: a rounded panel as tall as the window, Gym Tracker centered at its top and the
+     four tabs as square tiles spread down the rest (smaller squares on a short window). */
   .tabbar {
     position: sticky;
-    top: 0;
-    height: 100dvh;
+    top: var(--tile-gap);
+    right: auto;
+    bottom: auto;
+    left: auto;
+    align-self: start;
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    padding: 28px 14px;
-    border-top: 0;
-    border-right: 0.5px solid var(--hairline);
-    background: var(--bg);
+    width: auto;
+    height: calc(100dvh - 2 * var(--tile-gap));
+    margin: 0;
+    padding: 18px 14px 14px;
+    background: var(--panel);
     backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border: 0;
   }
 
   .brand {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 10px;
-    font-weight: 600;
-    padding: 0 10px 22px;
+    padding: 4px 0 18px;
+    font-size: 17px;
+    font-weight: 650;
+    white-space: nowrap;
   }
 
   .brand svg {
     color: var(--accent);
   }
 
+  .tabs {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-evenly;
+    gap: var(--tile-gap);
+    container-type: size;
+  }
+
   .tab {
-    flex-direction: row;
-    justify-content: flex-start;
-    gap: 12px;
-    padding: 10px 12px;
-    border-radius: var(--radius-sm);
-    font-size: 15px;
-    color: var(--text-2);
+    flex: none;
+    width: min(100cqw, (100cqh - 3 * var(--tile-gap)) / 4);
+    aspect-ratio: 1;
+    overflow: hidden;
+    background: var(--tile);
+    border: 1px solid var(--accent-line);
+    border-radius: var(--tile-radius);
   }
 
-  .tab:hover {
-    background: var(--surface-raised);
+  .tab-face {
+    gap: 10px;
+    font-size: 14px;
   }
 
-  .tab[aria-current="page"] {
-    background: var(--surface-raised);
+  .tab svg {
+    width: 30px;
+    height: 30px;
+  }
+
+  .tab-marker {
+    border-radius: var(--tile-radius);
   }
 
   .shell-main {
-    --main-pad-top: 36px;
-    --main-pad-bottom: 64px;
-    max-width: 1080px;
-    width: 100%;
-    padding: var(--main-pad-top) 40px var(--main-pad-bottom);
+    --main-pad-top: 28px;
+    --main-pad-bottom: 28px;
+    max-width: none;
+    min-height: calc(100dvh - 2 * var(--tile-gap));
+    margin: 0;
+    padding: var(--main-pad-top) clamp(20px, 3vw, 40px) var(--main-pad-bottom);
+    background: var(--panel);
+    border-radius: var(--panel-radius);
+  }
+
+  .page {
+    min-height: calc(100dvh - 2 * var(--tile-gap) - var(--main-pad-top) - var(--main-pad-bottom));
+  }
+}
+
+@media (min-width: 900px) and (hover: hover) {
+  .tab:hover {
+    color: var(--text);
+    background: color-mix(in srgb, var(--text) 5%, var(--tile));
+  }
+}
+
+/* ───────────── Page: the whole content centered in its space ───────────── */
+
+/* CenterBlock: centers its content; content taller than the space starts at the top and scrolls.
+   `position: relative` so the content's offsetTop is measured from here (see CenterBlock). */
+.center-block {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Held (a row is open, a day step): stays where it was and grows downward instead of re-centering. */
+.center-block.is-held {
+  justify-content: flex-start;
+}
+
+/* The page fills the space between the top of the screen and the tab bar (phone) or the main panel. */
+.page {
+  min-height: calc(100dvh - var(--main-pad-top) - var(--main-pad-bottom));
+}
+
+.page-content {
+  width: 100%;
+  max-width: 1180px;
+  margin-inline: auto;
+}
+
+/* Lists and forms read better in a narrower column; the calendar and the chart use the room. */
+.page-content[data-page="home"],
+.page-content[data-page="settings"],
+.page-content[data-page="setup"],
+.page-content[data-page="import"] {
+  max-width: 720px;
+}
+
+.page-content[data-page="workout"] {
+  max-width: 920px;
+}
+
+/* A new page fades in and rises a little (only on a page switch, never on a data refresh). */
+.page-in {
+  animation: page-in var(--dur) var(--ease-out);
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
   }
 }
 
 /* ───────────── Screen header ───────────── */
 
+/* Title centered; actions (Done, Close) on the right in a column as wide as the empty one on the left. */
 .screen-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 18px;
+  display: grid;
+  grid-template-columns: minmax(0, 64px) minmax(0, 1fr) minmax(0, 64px);
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  text-align: center;
 }
 
-.screen-head .sub {
+.screen-head .head-text {
+  grid-column: 2;
+  min-width: 0;
+}
+
+/* Level with the title's line, not the middle of title + sub. */
+.screen-head .head-actions {
+  grid-column: 3;
+  justify-self: end;
+  align-self: start;
+  margin-top: 9px;
+}
+
+.sub {
   font-size: 13px;
   color: var(--text-2);
   margin-top: 2px;
@@ -150,13 +303,17 @@
   place-items: center;
   width: 36px;
   height: 36px;
+  flex: none;
   border-radius: 50%;
   color: var(--text-2);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out,
+    color var(--dur-fast) ease-out;
 }
 
-.icon-btn:hover {
-  background: var(--surface-raised);
-  color: var(--text);
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.9);
 }
 
 .icon-btn:disabled {
@@ -170,28 +327,88 @@
   font-size: 14px;
 }
 
+/* A small capitals label over a tile, with an optional action on the right. */
 .section-title {
-  font-size: 13px;
-  color: var(--text-2);
-  font-weight: 500;
-  margin: 26px 0 8px;
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  gap: 12px;
+  margin: 24px 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
 }
 
-/* Label in the middle, optional action on the right. */
+.section-title .link,
+.section-title button,
+.section-title a {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+/* Label in the middle, an action on each side (either may be empty). */
 .section-title.centered {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
 }
 
-.section-title.centered > :first-child {
-  grid-column: 2;
+.section-title.centered > :nth-child(1) {
+  justify-self: start;
 }
 
 .section-title.centered > :nth-child(2) {
+  text-align: center;
+}
+
+.section-title.centered > :nth-child(3) {
   justify-self: end;
+}
+
+/* ───────────── Tiles ───────────── */
+
+/* A solid rounded tile: what everything on a page sits on. `.card` is the same tile (older name). */
+.tile,
+.card {
+  background: var(--tile);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--tile-radius);
+  padding: 16px;
+}
+
+.empty {
+  text-align: center;
+  padding: 48px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+
+.empty.tile {
+  padding: 32px 16px;
+}
+
+.empty p {
+  color: var(--text-2);
+  max-width: 320px;
+}
+
+.notice {
+  font-size: 13px;
+  color: var(--text-2);
+  background: var(--tile);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--tile-radius);
+  padding: 12px 14px;
+}
+
+.error-text {
+  color: var(--bad);
+  font-size: 13px;
 }
 
 /* ───────────── Buttons, inputs, controls ───────────── */
@@ -204,13 +421,17 @@
   min-height: 42px;
   padding: 0 16px;
   border-radius: var(--radius);
-  border: 0.5px solid var(--hairline-strong);
+  border: 1px solid var(--accent-line);
   font-size: 15px;
   color: var(--text);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out,
+    border-color var(--dur-fast) ease-out;
 }
 
-.btn:hover {
-  background: var(--surface-raised);
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .btn.primary {
@@ -245,9 +466,10 @@
   padding: 10px 12px;
   color: var(--text); /* not inherited, e.g. from a muted label wrapping the input */
   background: var(--surface);
-  border: 0.5px solid var(--hairline);
+  border: 1px solid var(--accent-line);
   border-radius: var(--radius-sm);
   font-size: 16px; /* 16px stops iPhone zooming in on focus */
+  transition: border-color var(--dur-fast) ease-out;
 }
 
 .field:focus {
@@ -271,13 +493,14 @@ select.field {
   padding-right: 30px;
 }
 
+/* A row of choices on its own tile; the picked one gets the accent's fill and outline. */
 .segmented {
   display: flex;
   gap: 4px;
-  padding: 3px;
-  background: var(--surface);
-  border: 0.5px solid var(--hairline);
-  border-radius: 10px;
+  padding: 4px;
+  background: var(--tile);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--tile-radius);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -288,18 +511,27 @@ select.field {
 
 .segmented button {
   flex: 1 0 auto;
-  min-height: 34px;
+  min-height: 36px;
   padding: 0 12px;
-  border-radius: 8px;
+  border-radius: calc(var(--tile-radius) - 5px);
   font-size: 14px;
   color: var(--text-2);
   white-space: nowrap;
+  transition:
+    background-color var(--dur) ease-out,
+    color var(--dur) ease-out,
+    box-shadow var(--dur) ease-out,
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.segmented button:active {
+  transform: scale(0.96);
 }
 
 .segmented button[aria-pressed="true"] {
-  background: var(--surface-raised);
+  background: var(--accent-soft);
   color: var(--text);
-  box-shadow: inset 0 0 0 0.5px var(--hairline-strong);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
 .toggle {
@@ -309,7 +541,7 @@ select.field {
   height: 28px;
   border-radius: 99px;
   background: var(--hairline-strong);
-  transition: background 0.15s;
+  transition: background-color var(--dur) ease-out;
 }
 
 .toggle::after {
@@ -321,7 +553,7 @@ select.field {
   height: 22px;
   border-radius: 50%;
   background: #fff;
-  transition: transform 0.15s;
+  transition: transform var(--dur) var(--ease-out);
 }
 
 .toggle[aria-checked="true"] {
@@ -354,17 +586,18 @@ select.field {
   gap: 6px;
   font-size: 12px;
   color: var(--text-2);
-  background: var(--surface-raised);
+  background: var(--tile);
+  border: 1px solid var(--tile-line);
   padding: 4px 10px;
   border-radius: 99px;
   white-space: nowrap;
 }
 
-/* List rows: hairlines in OLED, raised cards in Graphite (both from tokens). */
+/* List rows: each row is a tile of its own (Home's workouts, Settings' links, a sheet's choices). */
 .list {
   display: flex;
   flex-direction: column;
-  gap: var(--row-gap);
+  gap: var(--row-tile-gap);
 }
 
 .list-row {
@@ -372,17 +605,21 @@ select.field {
   align-items: center;
   gap: 12px;
   width: 100%;
-  min-height: 56px;
-  padding: 12px var(--row-pad-x);
-  background: var(--row-bg);
-  border-radius: var(--row-radius);
-  border-bottom: 0.5px solid var(--row-divider);
+  min-height: 60px;
+  padding: 12px 16px;
+  background: var(--tile);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--tile-radius);
   text-align: left;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out,
+    border-color var(--dur-fast) ease-out;
 }
 
-button.list-row:hover,
-a.list-row:hover {
-  background: color-mix(in srgb, var(--surface-raised) 70%, var(--row-bg));
+a.list-row:active,
+button.list-row:active {
+  transform: scale(0.985);
 }
 
 .list-row .grow {
@@ -403,7 +640,7 @@ a.list-row:hover {
   color: var(--text-3);
 }
 
-/* Home: workout day rows with centered text (icons on the right, matching spacer on the left). */
+/* Home and rest days: workout rows with centered text (icons on the right, a matching spacer on the left). */
 .day-row {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr) 52px;
@@ -417,51 +654,8 @@ a.list-row:hover {
   gap: 4px;
 }
 
-/* Desktop: list-style pages sit in a centered column instead of stretching across. */
-@media (min-width: 900px) {
-  .home,
-  .setup-page {
-    max-width: 720px;
-    margin-inline: auto;
-  }
-}
-
-.card {
-  background: var(--surface);
-  border: 0.5px solid var(--hairline);
-  border-radius: var(--radius);
-  padding: 16px;
-}
-
-.empty {
-  text-align: center;
-  padding: 48px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  align-items: center;
-}
-
-.empty p {
-  color: var(--text-2);
-  max-width: 320px;
-}
-
-.notice {
-  font-size: 13px;
-  color: var(--text-2);
-  background: var(--surface);
-  border: 0.5px solid var(--hairline);
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
-}
-
-.error-text {
-  color: var(--bad);
-  font-size: 13px;
-}
-
-/* Bottom sheet (calendar day, confirmations) */
+/* Bottom sheet (calendar day, confirmations): a rounded panel floating above the bottom edge on
+   phones, a centered dialog on a computer. */
 .sheet-backdrop {
   position: fixed;
   inset: 0;
@@ -470,7 +664,9 @@ a.list-row:hover {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  animation: fade 0.15s ease-out;
+  padding: var(--tile-gap) calc(var(--tile-gap) + env(safe-area-inset-right)) max(var(--tile-gap), env(safe-area-inset-bottom))
+    calc(var(--tile-gap) + env(safe-area-inset-left));
+  animation: fade var(--dur-fast) ease-out;
 }
 
 .sheet {
@@ -478,32 +674,66 @@ a.list-row:hover {
   max-width: 520px;
   max-height: 80dvh;
   overflow-y: auto;
-  background: var(--surface);
-  border: 0.5px solid var(--hairline);
-  border-radius: 18px 18px 0 0;
-  padding: 18px var(--gutter) calc(20px + env(safe-area-inset-bottom));
-  animation: rise 0.2s ease-out;
+  overscroll-behavior: contain;
+  background: var(--panel);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--panel-radius);
+  padding: 18px var(--gutter);
+  animation: rise var(--dur) var(--ease-out);
 }
 
 @media (min-width: 900px) {
   .sheet-backdrop {
     align-items: center;
   }
-
-  .sheet {
-    border-radius: 18px;
-  }
 }
 
 @keyframes fade {
-  from { opacity: 0; }
+  from {
+    opacity: 0;
+  }
 }
 
 @keyframes rise {
-  from { transform: translateY(24px); opacity: 0; }
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}
+
+/* Something that opens in place (an exercise's editor, a note, a day's card) eases in. */
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 
 /* ───────────── Home ───────────── */
+
+/* The week tile: ‹ title › on top, the seven days under it. */
+.week-tile {
+  padding: 10px 10px 12px;
+}
+
+.week-head {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  justify-items: center;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.week-title {
+  min-width: 0;
+}
+
+/* "Dec 28, 2026 – Jan 3, 2027" and "| Week 53" never break inside: if the line can't fit
+   between the arrows on a phone, only the week number moves down. */
+.week-title .sub > span {
+  white-space: nowrap;
+}
 
 .week-strip {
   display: grid;
@@ -516,9 +746,18 @@ a.list-row:hover {
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  min-width: 0;
   padding: 8px 0 10px;
-  border-radius: var(--radius-sm);
-  border: 0.5px solid transparent;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur) ease-out,
+    border-color var(--dur) ease-out;
+}
+
+.week-day:active {
+  transform: scale(0.94);
 }
 
 .week-day .wd {
@@ -556,8 +795,8 @@ a.list-row:hover {
 }
 
 .week-day[aria-pressed="true"] {
-  background: var(--surface-raised);
-  border-color: var(--hairline-strong);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
 }
 
 .tag-planned {
@@ -565,21 +804,19 @@ a.list-row:hover {
   color: var(--accent);
 }
 
-/* "Dec 28, 2026 – Jan 3, 2027" and "| Week 53" never break inside: if the line can't fit
-   beside the arrows and the Today link on a phone, only the week number moves down. */
-.home-head .sub > span {
-  white-space: nowrap;
-}
-
-.home-head-side {
+/* The sync status under the rows. Sync is set up but has nothing to say yet: keep the chip's
+   space, so the page doesn't grow (and move) when it appears. */
+.home-foot {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
+  justify-content: center;
+  margin-top: 16px;
 }
 
-/* Sync is set up but has nothing to say yet: keep the chip's space so the header doesn't grow when it appears. */
-.home-head-side .chip.is-placeholder {
+.home-foot:empty {
+  display: none;
+}
+
+.home-foot .chip.is-placeholder {
   visibility: hidden;
 }
 
@@ -591,137 +828,61 @@ a.list-row:hover {
   transition: opacity 0.2s ease-out;
 }
 
-.week-nav {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-right: -8px;
+/* ───────────── Workout and rest-day screens ───────────── */
+
+/* Everything below a workout screen's header (it slides on a day step; the header stays). */
+.slide-back {
+  animation: slide-back var(--dur) var(--ease-out);
 }
 
-.week-nav .link {
-  margin-right: 6px;
-}
-
-/* ───────────── Session ───────────── */
-
-/* Everything below a workout screen's header; it fills the page so CenterBlock can center. */
-.slide-body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.slide-body.slide-back {
-  animation: slide-back 0.22s ease-out;
-}
-
-.slide-body.slide-forward {
-  animation: slide-forward 0.22s ease-out;
+.slide-forward {
+  animation: slide-forward var(--dur) var(--ease-out);
 }
 
 @keyframes slide-back {
-  from { transform: translateX(-28px); opacity: 0.3; }
+  from {
+    transform: translateX(-28px);
+    opacity: 0.3;
+  }
 }
 
 @keyframes slide-forward {
-  from { transform: translateX(28px); opacity: 0.3; }
+  from {
+    transform: translateX(28px);
+    opacity: 0.3;
+  }
 }
 
+/* Name centered (the ‹ back on the left, a spacer as wide on the right); then ‹ date ›; then
+   Last / Next session. A rest day has the same first two lines, so the arrows never move. */
 .session-head {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
-  grid-template-areas:
-    "back name jumps"
-    ".    sub  sub";
-  align-items: center;
-  column-gap: 8px;
-  row-gap: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin-bottom: 16px;
 }
 
-.session-head > .icon-btn {
-  grid-area: back;
+.session-top {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  align-items: center;
+  column-gap: 8px;
 }
 
 .session-name {
-  grid-area: name;
+  grid-column: 2;
   min-width: 0;
+  text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.session-jumps {
-  grid-area: jumps;
-  display: flex;
-  gap: 6px;
-  justify-self: end;
-}
-
-.jump-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  min-height: 30px;
-  padding: 0 10px;
-  border-radius: 99px;
-  border: 0.5px solid var(--hairline-strong);
-  font-size: 13px;
-  color: var(--text-2);
-  white-space: nowrap;
-}
-
-.jump-btn:hover:not(:disabled) {
-  background: var(--surface-raised);
-  color: var(--text);
-}
-
-.jump-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-/* "Last session" on roomy screens, "Last" on narrow phones. */
-.wide-only {
-  display: none;
-}
-
-@media (min-width: 440px) {
-  .wide-only {
-    display: inline;
-  }
-}
-
-/* Second line: the date (tap to change it) on the left, the day arrows on the right. */
-.session-sub {
-  grid-area: sub;
+.day-stepper {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 8px;
-  min-width: 0;
-}
-
-.session-sub .date-picker {
-  min-width: 0;
-  white-space: nowrap;
-}
-
-.day-arrows {
-  display: flex;
-  flex: none;
-  gap: 4px;
-  margin-right: -6px;
-}
-
-.session-foot {
-  margin-top: 28px;
-  text-align: center;
-}
-
-/* Nothing logged yet: the footer keeps its space, so the centered list doesn't jump when it appears. */
-.session-foot.is-hidden {
-  visibility: hidden;
 }
 
 .date-picker {
@@ -729,8 +890,14 @@ a.list-row:hover {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--accent-line);
+  border-radius: 99px;
+  font-size: 14px;
   color: var(--text-2);
+  white-space: nowrap;
 }
 
 .date-picker input {
@@ -741,17 +908,85 @@ a.list-row:hover {
   cursor: pointer;
 }
 
+.session-jumps {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.jump-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 99px;
+  border: 1px solid var(--accent-line);
+  font-size: 13px;
+  color: var(--text-2);
+  white-space: nowrap;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out,
+    color var(--dur-fast) ease-out;
+}
+
+.jump-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.jump-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.session-foot {
+  margin-top: 20px;
+  text-align: center;
+}
+
+/* Nothing logged yet: the footer keeps its space, so the centered page doesn't jump when it appears. */
+.session-foot.is-hidden {
+  visibility: hidden;
+}
+
 .past-banner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
   font-size: 13px;
   color: var(--text-2);
   background: var(--accent-soft);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius);
   padding: 8px 12px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
+}
+
+/* A rest day's workouts: a list, in the narrower column of Home. */
+.day-screen .slide-body {
+  max-width: 720px;
+  margin-inline: auto;
+}
+
+.day-screen .section-title {
+  margin-top: 8px;
+}
+
+/* The exercises: one tile, a hairline between rows; the open row is tinted. */
+.ex-table {
+  background: var(--tile);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--tile-radius);
+  overflow: hidden;
+}
+
+.ex-list {
+  display: flex;
+  flex-direction: column;
 }
 
 .ex-head {
@@ -767,16 +1002,19 @@ a.list-row:hover {
   column-gap: 12px;
   row-gap: 2px;
   width: 100%;
-  padding: 14px var(--row-pad-x);
-  background: var(--row-bg);
-  border-radius: var(--row-radius);
-  border-bottom: 0.5px solid var(--row-divider);
+  padding: 14px 16px;
+  border-top: 1px solid var(--tile-line);
   text-align: left;
   cursor: pointer;
+  transition: background-color var(--dur) ease-out;
+}
+
+.ex-list > .ex-row:first-child {
+  border-top: 0;
 }
 
 .ex-row.open {
-  background: color-mix(in srgb, var(--surface) 80%, var(--row-bg));
+  background: color-mix(in srgb, var(--text) 5%, var(--tile));
 }
 
 .ex-name {
@@ -843,6 +1081,7 @@ a.list-row:hover {
   margin-top: 6px;
   border-left: 1.5px solid var(--accent);
   white-space: pre-wrap;
+  animation: reveal var(--dur) var(--ease-out);
 }
 
 .ex-editor {
@@ -852,6 +1091,7 @@ a.list-row:hover {
   flex-direction: column;
   gap: 10px;
   cursor: default;
+  animation: reveal var(--dur) var(--ease-out);
 }
 
 .set-row {
@@ -877,11 +1117,12 @@ a.list-row:hover {
   min-height: 44px;
   padding: 8px 10px;
   background: var(--bg);
-  border: 0.5px solid var(--hairline-strong);
+  border: 1px solid var(--accent-line);
   border-radius: var(--radius-sm);
   font-size: 18px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+  transition: border-color var(--dur-fast) ease-out;
 }
 
 .set-input:focus {
@@ -946,10 +1187,10 @@ a.list-row:hover {
 
   .ex-head {
     display: grid;
-    padding: 0 var(--row-pad-x) 8px;
+    padding: 12px 16px 10px;
     font-size: 12px;
     color: var(--text-3);
-    border-bottom: 0.5px solid var(--hairline);
+    border-bottom: 1px solid var(--tile-line);
   }
 
   .ex-head span,
@@ -1012,25 +1253,45 @@ a.list-row:hover {
 
 /* ───────────── Calendar ───────────── */
 
+.calendar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tile-gap);
+}
+
+/* The year tile: ‹ 2026 ›, the count, the legend, all centered. */
+.cal-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 16px 14px;
+  text-align: center;
+}
+
 .year-switch {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
 }
 
 .year-switch .year {
-  font-size: 26px;
-  font-weight: 600;
-  min-width: 70px;
+  min-width: 80px;
   text-align: center;
+}
+
+.cal-count {
+  margin-top: 0;
 }
 
 .legend {
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 16px;
+  margin-top: 6px;
   font-size: 12px;
   color: var(--text-2);
-  margin-bottom: 14px;
 }
 
 .legend span {
@@ -1039,13 +1300,16 @@ a.list-row:hover {
   gap: 6px;
 }
 
+/* Each month on its own tile: 2 across on a phone, 3 when there's room, 4 on a wide screen. */
 .months {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 22px 16px;
+  gap: var(--tile-gap);
 }
 
-@media (min-width: 640px) {
+/* (Viewport widths, not a container query: a query container would also hold the day sheet,
+   which is position: fixed.) */
+@media (min-width: 600px) {
   .months {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -1057,15 +1321,20 @@ a.list-row:hover {
   }
 }
 
+.month {
+  padding: 12px 8px 8px;
+}
+
 .month h3 {
   font-size: 14px;
   font-weight: 600;
   margin-bottom: 6px;
+  text-align: center;
 }
 
 .month-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   row-gap: 2px;
 }
 
@@ -1082,14 +1351,17 @@ a.list-row:hover {
   align-items: center;
   gap: 2px;
   padding: 3px 0;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 12px;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out;
 }
 
-.cal-day:hover {
-  background: var(--surface-raised);
+.cal-day:active {
+  transform: scale(0.9);
 }
 
 .cal-day .dot-slot {
@@ -1114,17 +1386,39 @@ a.list-row:hover {
 
 /* ───────────── Progress ───────────── */
 
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tile-gap);
+}
+
+.progress > .screen-head {
+  margin-bottom: 4px;
+}
+
 .progress-controls {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: var(--tile-gap);
+}
+
+.chart-tile {
+  padding: 12px 8px 6px;
 }
 
 .chart-box {
   position: relative;
   height: 300px;
-  margin: 6px -4px 10px;
+}
+
+/* "Nothing logged in this range" takes the chart's place at the chart's height. */
+.chart-empty {
+  justify-content: center;
+  min-height: calc(300px + 18px);
+}
+
+.series-tile .section-title {
+  margin: 0 2px 12px;
 }
 
 @media (min-width: 900px) {
@@ -1139,6 +1433,10 @@ a.list-row:hover {
 
   .chart-box {
     height: 420px;
+  }
+
+  .chart-empty {
+    min-height: calc(420px + 18px);
   }
 }
 
@@ -1155,9 +1453,17 @@ a.list-row:hover {
   min-height: 34px;
   padding: 0 12px;
   border-radius: 99px;
-  border: 0.5px solid var(--hairline-strong);
+  border: 1px solid var(--accent-line);
   font-size: 13px;
   color: var(--text);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    color var(--dur) ease-out,
+    border-color var(--dur) ease-out;
+}
+
+.series-chip:active {
+  transform: scale(0.95);
 }
 
 .series-chip .swatch {
@@ -1168,7 +1474,7 @@ a.list-row:hover {
 
 .series-chip[aria-pressed="false"] {
   color: var(--text-3);
-  border-color: var(--hairline);
+  border-color: var(--tile-line);
 }
 
 .series-chip[aria-pressed="false"] .swatch {
@@ -1181,6 +1487,25 @@ a.list-row:hover {
   color: var(--text-3);
 }
 
+.table-tile {
+  padding: 0 16px;
+}
+
+.table-tile > summary {
+  padding: 14px 0;
+  text-align: center;
+}
+
+.table-tile[open] > summary {
+  border-bottom: 1px solid var(--tile-line);
+}
+
+.table-tile .table-scroll {
+  margin: 0 -16px;
+  padding: 4px 16px 10px;
+  animation: reveal var(--dur) var(--ease-out);
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -1191,7 +1516,7 @@ a.list-row:hover {
 .data-table th,
 .data-table td {
   padding: 6px 8px;
-  border-bottom: 0.5px solid var(--hairline);
+  border-bottom: 1px solid var(--tile-line);
   text-align: right;
   white-space: nowrap;
 }
@@ -1220,11 +1545,11 @@ details > summary {
 
 /* ───────────── Setup & settings ───────────── */
 
-/* Workout Days: collapsible cards. Head = name + summary; body = name, exercises, add, actions. */
+/* Workout Days: collapsible tiles. Head = name + summary; body = name, exercises, add, actions. */
 .day-cards {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--row-tile-gap);
 }
 
 .day-card {
@@ -1239,10 +1564,7 @@ details > summary {
   width: 100%;
   padding: 16px;
   text-align: left;
-}
-
-.day-card-head:hover {
-  background: color-mix(in srgb, var(--surface-raised) 50%, transparent);
+  transition: background-color var(--dur-fast) ease-out;
 }
 
 .day-card-head .grow {
@@ -1266,7 +1588,7 @@ details > summary {
 .day-card-head .caret {
   display: inline-grid;
   color: var(--text-3);
-  transition: transform 0.2s ease;
+  transition: transform var(--dur) var(--ease-out);
 }
 
 .day-card.open .day-card-head .caret {
@@ -1278,7 +1600,8 @@ details > summary {
   flex-direction: column;
   gap: 18px;
   padding: 16px;
-  border-top: 0.5px solid var(--hairline);
+  border-top: 1px solid var(--tile-line);
+  animation: reveal var(--dur) var(--ease-out);
 }
 
 .field-label {
@@ -1309,7 +1632,7 @@ details > summary {
 
 .ex-edit {
   padding: 6px 0;
-  border-top: 0.5px solid var(--hairline);
+  border-top: 1px solid var(--tile-line);
 }
 
 .ex-edit-name {
@@ -1328,7 +1651,7 @@ details > summary {
   flex: none;
   font-size: 11px;
   color: var(--text-3);
-  border: 0.5px solid var(--hairline-strong);
+  border: 1px solid var(--tile-line);
   border-radius: 99px;
   padding: 1px 7px;
 }
@@ -1357,13 +1680,13 @@ details > summary {
   padding: 10px 0;
   font-size: 14px;
   color: var(--text-2);
-  border-top: 0.5px solid var(--hairline);
+  border-top: 1px solid var(--tile-line);
 }
 
 .removed-toggle .caret {
   display: inline-grid;
   color: var(--text-3);
-  transition: transform 0.2s ease;
+  transition: transform var(--dur) var(--ease-out);
 }
 
 .removed-toggle[aria-expanded="true"] .caret {
@@ -1399,11 +1722,6 @@ details > summary {
   border-color: transparent;
   padding-inline: 0;
   text-overflow: ellipsis;
-}
-
-.field.quiet:hover {
-  background: var(--surface-raised);
-  padding-inline: 10px;
 }
 
 .field.quiet:focus {
@@ -1449,6 +1767,7 @@ details > summary {
   flex-wrap: wrap;
   gap: 6px;
   padding: 6px 0 4px;
+  animation: reveal var(--dur) var(--ease-out);
 }
 
 .chip-btn {
@@ -1458,14 +1777,17 @@ details > summary {
   min-height: 34px;
   padding: 0 12px;
   border-radius: 999px;
-  border: 0.5px solid var(--hairline-strong);
+  border: 1px solid var(--accent-line);
   font-size: 13px;
   color: var(--text-2);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out,
+    color var(--dur-fast) ease-out;
 }
 
-.chip-btn:hover {
-  background: var(--surface-raised);
-  color: var(--text);
+.chip-btn:active:not(:disabled) {
+  transform: scale(0.95);
 }
 
 .chip-btn:disabled {
@@ -1503,7 +1825,7 @@ form.add-row {
   flex-wrap: wrap;
   gap: 8px;
   padding-top: 14px;
-  border-top: 0.5px solid var(--hairline);
+  border-top: 1px solid var(--tile-line);
 }
 
 .inline {
@@ -1615,8 +1937,15 @@ form.add-row {
   height: 32px;
   border-radius: 50%;
   font-size: 12px;
-  border: 0.5px solid var(--hairline-strong);
+  border: 1px solid var(--accent-line);
   color: var(--text-2);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out;
+}
+
+.weekday-chips button:active {
+  transform: scale(0.9);
 }
 
 .weekday-chips button[aria-pressed="true"] {
@@ -1635,6 +1964,56 @@ form.add-row {
 .loading {
   display: grid;
   place-items: center;
-  min-height: 60dvh;
+  min-height: 40dvh;
   color: var(--text-3);
+}
+
+/* ───────────── Hover (only where there is a mouse: a tap on a phone would leave it stuck on) ───────────── */
+
+@media (hover: hover) {
+  .icon-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--text) 8%, transparent);
+    color: var(--text);
+  }
+
+  .btn:hover:not(:disabled):not(.primary):not([aria-pressed="true"]) {
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+  }
+
+  a.list-row:hover,
+  button.list-row:hover {
+    background: color-mix(in srgb, var(--text) 5%, var(--tile));
+    border-color: color-mix(in srgb, var(--accent) 60%, var(--tile-line));
+  }
+
+  .segmented button:hover:not([aria-pressed="true"]) {
+    color: var(--text);
+  }
+
+  .week-day:hover:not([aria-pressed="true"]) {
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+  }
+
+  .cal-day:hover {
+    background: color-mix(in srgb, var(--text) 8%, transparent);
+  }
+
+  .ex-row:hover:not(.open) {
+    background: color-mix(in srgb, var(--text) 3%, var(--tile));
+  }
+
+  .jump-btn:hover:not(:disabled),
+  .chip-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+    color: var(--text);
+  }
+
+  .day-card-head:hover {
+    background: color-mix(in srgb, var(--text) 4%, transparent);
+  }
+
+  .field.quiet:hover:not(:focus) {
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+    padding-inline: 10px;
+  }
 }

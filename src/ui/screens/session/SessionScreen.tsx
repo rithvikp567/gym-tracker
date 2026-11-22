@@ -1,6 +1,6 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { LocalDate } from "../../../domain/LocalDate";
-import { CenterBlock } from "../../components/CenterBlock";
+import { usePageHold } from "../../components/CenterBlock";
 import { BackButton } from "../../components/controls";
 import { Icon } from "../../components/Icon";
 import { useSwipe } from "../../hooks/useSwipe";
@@ -28,6 +28,9 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
   // App remounts this screen for every workout + date, so open rows and notes start closed.
   const slide = useSlide(`${dayId}/${iso}`);
   const stepDay = useDayStep(date, dayId);
+  // The page is centered as a whole; while a row or note is open it holds its place, so the row
+  // you tapped doesn't jump up as it grows (it also holds through day steps, see CenterPage).
+  usePageHold(openId !== null || noteIds.size > 0);
 
   const daysLive = useLiveState(() => services.setup.days(), [], "days");
   const days = daysLive.value;
@@ -60,7 +63,16 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
     navigate({ name: "session", dayId, date: target.toString() }, { replace: true });
   };
 
-  useSwipe(root, {
+  // The whole page area takes the swipe, not just the centered content (a short day leaves room around it).
+  const swipeArea = useMemo(
+    () => ({
+      get current() {
+        return root.current?.closest<HTMLElement>(".page") ?? root.current;
+      },
+    }),
+    [],
+  );
+  useSwipe(swipeArea, {
     onSwipeRight: prevDate ? () => goSession(prevDate, "back", false) : undefined,
     onSwipeLeft: nextDate ? () => goSession(nextDate, "forward", false) : undefined,
   });
@@ -94,62 +106,65 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
     });
 
   return (
-    <div ref={root}>
-      <div className="session-screen page-fill">
-        <div className="session-head">
+    <div ref={root} className="session-screen">
+      <header className="session-head">
+        <div className="session-top">
           <BackButton fallback={{ name: "home" }} />
           <h1 className="session-name">{day?.name ?? "\u00a0"}</h1>
-          <div className="session-jumps" role="group" aria-label={`Other ${day?.name ?? "workout"} sessions`}>
-            <button
-              type="button"
-              className="jump-btn"
-              disabled={!prevDate}
-              aria-label={prevDate ? `Last session, ${prevDate.shortLabel()}` : "No earlier session"}
-              onClick={() => prevDate && goSession(prevDate, "back", false)}
-            >
-              <Icon name="left" size={14} />
-              Last<span className="wide-only">&nbsp;session</span>
-            </button>
-            <button
-              type="button"
-              className="jump-btn"
-              disabled={!nextDate}
-              aria-label={nextDate ? `Next session, ${nextDate.shortLabel()}` : "No later session"}
-              onClick={() => nextDate && goSession(nextDate, "forward", false)}
-            >
-              Next<span className="wide-only">&nbsp;session</span>
-              <Icon name="right" size={14} />
-            </button>
-          </div>
-          <div className="session-sub">
-            <label className="date-picker num">
-              {date.labelWithWeek()}
-              <Icon name="down" size={14} />
-              <input
-                type="date"
-                aria-label="Change date"
-                value={date.toString()}
-                onChange={(e) => e.target.value && goSession(LocalDate.tryParse(e.target.value) ?? date, null, true)}
-              />
-            </label>
-            <DayArrows onStep={stepDay} />
-          </div>
         </div>
+        <DayArrows onStep={stepDay}>
+          <label className="date-picker num">
+            {date.labelWithWeek()}
+            <Icon name="down" size={14} />
+            <input
+              type="date"
+              aria-label="Change date"
+              value={date.toString()}
+              onChange={(e) => e.target.value && goSession(LocalDate.tryParse(e.target.value) ?? date, null, true)}
+            />
+          </label>
+        </DayArrows>
+        <div className="session-jumps" role="group" aria-label={`Other ${day?.name ?? "workout"} sessions`}>
+          <button
+            type="button"
+            className="jump-btn"
+            disabled={!prevDate}
+            aria-label={prevDate ? `Last session, ${prevDate.shortLabel()}` : "No earlier session"}
+            onClick={() => prevDate && goSession(prevDate, "back", false)}
+          >
+            <Icon name="left" size={14} />
+            Last session
+          </button>
+          <button
+            type="button"
+            className="jump-btn"
+            disabled={!nextDate}
+            aria-label={nextDate ? `Next session, ${nextDate.shortLabel()}` : "No later session"}
+            onClick={() => nextDate && goSession(nextDate, "forward", false)}
+          >
+            Next session
+            <Icon name="right" size={14} />
+          </button>
+        </div>
+      </header>
 
-        {/* Only the content slides: the header (and its arrows) stays put under your finger. */}
-        <div className={`slide-body${slide ? ` slide-${slide}` : ""}`}>
-          {!isToday && (
-            <div className="past-banner">
-              <span>{date.isBefore(today) ? `Viewing ${date.shortLabel()}` : `Planning ahead for ${date.shortLabel()}`}</span>
-              <button type="button" className="link" onClick={() => goSession(today, date.isBefore(today) ? "forward" : "back", true)}>
-                Back to today
-              </button>
-            </div>
-          )}
+      {/* Only the content slides: the header (and its arrows) stays put under your finger. */}
+      <div className={`slide-body${slide ? ` slide-${slide}` : ""}`}>
+        {!isToday && (
+          <div className="past-banner">
+            <span>{date.isBefore(today) ? `Viewing ${date.shortLabel()}` : `Planning ahead for ${date.shortLabel()}`}</span>
+            <button type="button" className="link" onClick={() => goSession(today, date.isBefore(today) ? "forward" : "back", true)}>
+              Back to today
+            </button>
+          </div>
+        )}
 
-          <CenterBlock hold={openId !== null || noteIds.size > 0}>
-            {data && (
-              <>
+        {/* The rows draw from the workout day at once and their numbers fill in, so the centered
+            page doesn't move when the session lands. */}
+        {day && (
+          <>
+            {exercises.length > 0 && (
+              <div className="ex-table">
                 <div className="ex-head" aria-hidden>
                   <span>Exercise</span>
                   <span>Weight</span>
@@ -157,7 +172,7 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
                   <span>{showLastSession ? "Last time" : ""}</span>
                   <span>Target</span>
                 </div>
-                <div className="list">
+                <div className="ex-list">
                   {exercises.map((ex) => (
                     <ExerciseRow
                       key={`${iso}:${ex.id}`}
@@ -166,40 +181,40 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
                       last={last?.get(ex.id)}
                       showLast={showLastSession}
                       open={openId === ex.id}
-                      onToggle={() => setOpenId((id) => (id === ex.id ? null : ex.id))}
+                      onToggle={() => data && setOpenId((id) => (id === ex.id ? null : ex.id))}
                       noteOpen={noteIds.has(ex.id)}
                       onToggleNote={() => toggleNote(ex.id)}
                       onSave={(log) => void services.sessions.saveLog(dayId, date, log)}
                     />
                   ))}
                 </div>
-                {/* Only from fresh data: a copy from before you added exercises would show it by mistake. */}
-                {!exercises.length && day && daysLive.fresh && live.fresh && (
-                  <div className="empty">
-                    <p>No exercises on {day.name} yet.</p>
-                    <a className="btn" href={href({ name: "setup", dayId })}>
-                      Add exercises
-                    </a>
-                  </div>
-                )}
-                {/* Always there, hidden until something is logged: the centered list keeps its height, so it doesn't jump. */}
-                <div className={`session-foot${hasContent ? "" : " is-hidden"}`} aria-hidden={hasContent ? undefined : true}>
-                  <button
-                    type="button"
-                    className="btn danger"
-                    disabled={!hasContent}
-                    onClick={() => {
-                      if (confirm(`Delete ${day?.name ?? "this workout"} on ${date.shortLabel()}?`))
-                        void services.sessions.delete(dayId, date);
-                    }}
-                  >
-                    <Icon name="trash" size={16} /> Delete this session
-                  </button>
-                </div>
-              </>
+              </div>
             )}
-          </CenterBlock>
-        </div>
+            {/* Only from fresh data: a copy from before you added exercises would show it by mistake. */}
+            {!exercises.length && day && daysLive.fresh && live.fresh && (
+              <div className="empty tile">
+                <p>No exercises on {day.name} yet.</p>
+                <a className="btn" href={href({ name: "setup", dayId })}>
+                  Add exercises
+                </a>
+              </div>
+            )}
+            {/* Always there, hidden until something is logged: the centered page keeps its height, so it doesn't jump. */}
+            <div className={`session-foot${hasContent ? "" : " is-hidden"}`} aria-hidden={hasContent ? undefined : true}>
+              <button
+                type="button"
+                className="btn danger"
+                disabled={!hasContent}
+                onClick={() => {
+                  if (confirm(`Delete ${day?.name ?? "this workout"} on ${date.shortLabel()}?`))
+                    void services.sessions.delete(dayId, date);
+                }}
+              >
+                <Icon name="trash" size={16} /> Delete this session
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

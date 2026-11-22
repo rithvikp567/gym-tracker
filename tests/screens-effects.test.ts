@@ -16,6 +16,7 @@ import { ProgressService } from "../src/services/ProgressService";
 import { SessionService } from "../src/services/SessionService";
 import { SettingsService } from "../src/services/SettingsService";
 import { SetupService } from "../src/services/SetupService";
+import { CenterPage, useHoldBriefly, usePageHold } from "../src/ui/components/CenterBlock";
 import { HOME_PICK_KEY, homePick, rememberHomeDay } from "../src/ui/homePick";
 import { useDayStep } from "../src/ui/hooks/useDayStep";
 import { useSwipe } from "../src/ui/hooks/useSwipe";
@@ -478,6 +479,42 @@ describe("swipe, mounted", () => {
     expect(el.listeners.map((l) => l.type).sort()).toEqual(["touchend", "touchstart"]);
     unmount();
     expect(el.listeners).toEqual([]);
+  });
+});
+
+describe("centered page holds, mounted", () => {
+  /** A screen with something that opens (a row) and a control that changes the page's height (a range). */
+  function Screen({ open, onNudge }: { open: boolean; onNudge: (nudge: () => void) => void }) {
+    usePageHold(open);
+    onNudge(useHoldBriefly());
+    return createElement("p", null, "Screen");
+  }
+  const page = (host: FakeElement) => one(host, "page");
+  const held = (host: FakeElement) => byClass(host, "is-held").length > 0;
+
+  it("holds while a screen has something open, and lets go when it closes", () => {
+    const host = mount(createElement(CenterPage, { page: "workout", enter: false, children: createElement(Screen, { open: false, onNudge() {} }) }));
+    expect(page(host).getAttribute("class")).toBe("center-block page");
+    rerender(createElement(CenterPage, { page: "workout", enter: false, children: createElement(Screen, { open: true, onNudge() {} }) }));
+    expect(held(host)).toBe(true);
+    rerender(createElement(CenterPage, { page: "workout", enter: false, children: createElement(Screen, { open: false, onNudge() {} }) }));
+    expect(held(host)).toBe(false);
+  });
+
+  it("holds for a moment after a nudge (a range or year switch), then re-centers", async () => {
+    let nudge = () => {};
+    const host = mount(
+      createElement(CenterPage, {
+        page: "progress",
+        enter: true,
+        children: createElement(Screen, { open: false, onNudge: (n) => (nudge = n) }),
+      }),
+    );
+    expect(one(host, "page-content").getAttribute("class")).toBe("center-block-content page-content page-in");
+    act(() => nudge());
+    expect(held(host)).toBe(true);
+    await settle(1300);
+    expect(held(host)).toBe(false);
   });
 });
 

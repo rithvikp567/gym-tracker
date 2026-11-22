@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { RANGES, type ProgressLine, type RangeKey } from "../../../services/ProgressService";
+import { useHoldBriefly } from "../../components/CenterBlock";
 import { ScreenHead, Segmented } from "../../components/controls";
 import { useViewState } from "../../hooks/useViewState";
 import { href, navigate } from "../../router";
@@ -16,6 +17,7 @@ const SERIES = 8;
 export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) {
   const { setup, progress } = useServices();
   const { theme } = useSettings();
+  const holdBriefly = useHoldBriefly();
   const [range, setRange] = useViewState<RangeKey>("progress.range", () => "6M", "device");
   const [lastDayId, setLastDayId] = useViewState<string | null>("progress.day", () => null, "device");
   const daysLive = useLiveState(() => setup.days(), [], "days");
@@ -51,15 +53,15 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
   if (!days || (!day && !daysLive.fresh)) return <div className="loading">Loading…</div>;
   if (!day) {
     return (
-      <>
+      <div className="progress">
         <ScreenHead title="Progress" />
-        <div className="empty">
+        <div className="tile empty">
           <p>Set up your workout days first, then your lifts will chart here.</p>
           <a className="btn" href={href({ name: "setup" })}>
             Set up workout days
           </a>
         </div>
-      </>
+      </div>
     );
   }
 
@@ -73,65 +75,82 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
   };
 
   return (
-    <>
+    <div className="progress">
       <ScreenHead
         title="Progress"
         sub={day.allExercises().some((e) => e.unit === "plates") ? "Heaviest set each session · plates counted in lb" : "Heaviest set each session"}
       />
+      {/* Each picker is its own tile. A pick can change the page's height (a range with nothing
+          logged), so the page holds its place for a moment and the pickers stay under your finger. */}
       <div className="progress-controls">
         <Segmented
           label="Workout day"
           options={days.map((d) => ({ key: d.id, label: d.name }))}
           value={day.id}
-          onChange={(id) => navigate({ name: "progress", dayId: id }, { replace: true })}
+          onChange={(id) => {
+            holdBriefly();
+            navigate({ name: "progress", dayId: id }, { replace: true });
+          }}
         />
-        <Segmented label="Time range" options={RANGES} value={range} onChange={setRange} />
+        <Segmented
+          label="Time range"
+          options={RANGES}
+          value={range}
+          onChange={(key) => {
+            holdBriefly();
+            setRange(key);
+          }}
+        />
       </div>
 
       {data && lines.length === 0 && live.fresh && (
-        <div className="empty">
+        <div className="tile empty chart-empty">
           <p>No weights logged for {day.name} in this range.</p>
         </div>
       )}
 
       {data && lines.length > 0 && (
         <>
-          <WeightChart data={data} range={range} colors={colors} hidden={hidden} theme={theme} />
-          <div className="section-title" style={{ marginTop: 4 }}>
-            <span>Exercises</span>
-            <span className="inline">
-              <button type="button" className="link" onClick={() => setHidden(new Set())}>
-                All
-              </button>
-              <button type="button" className="link" onClick={() => setHidden(new Set(lines.map((l) => l.exercise.id)))}>
-                None
-              </button>
-              {/* Rename, merge (e.g. old spellings of one lift), restore, or delete exercises. */}
-              <a className="link" href={href({ name: "setup", dayId: day.id })}>
-                Edit
-              </a>
-            </span>
+          <div className="tile chart-tile">
+            <WeightChart data={data} range={range} colors={colors} hidden={hidden} theme={theme} />
           </div>
-          <div className="series-chips">
-            {lines.map((line) => (
-              <button
-                key={line.exercise.id}
-                type="button"
-                className="series-chip"
-                aria-pressed={!hidden.has(line.exercise.id)}
-                onClick={() => toggle(line.exercise.id)}
-              >
-                <span className="swatch" style={{ background: colors.get(line.exercise.id) ?? "var(--series-other)" }} />
-                {line.exercise.name}
-                {line.exercise.unit === "plates" && <span className="archived">plates</span>}
-                {line.exercise.archived && <span className="archived">old</span>}
-              </button>
-            ))}
-          </div>
+          <section className="tile series-tile" aria-label="Exercises">
+            <div className="section-title">
+              <span>Exercises</span>
+              <span className="inline">
+                <button type="button" className="link" onClick={() => setHidden(new Set())}>
+                  All
+                </button>
+                <button type="button" className="link" onClick={() => setHidden(new Set(lines.map((l) => l.exercise.id)))}>
+                  None
+                </button>
+                {/* Rename, merge (e.g. old spellings of one lift), restore, or delete exercises. */}
+                <a className="link" href={href({ name: "setup", dayId: day.id })}>
+                  Edit
+                </a>
+              </span>
+            </div>
+            <div className="series-chips">
+              {lines.map((line) => (
+                <button
+                  key={line.exercise.id}
+                  type="button"
+                  className="series-chip"
+                  aria-pressed={!hidden.has(line.exercise.id)}
+                  onClick={() => toggle(line.exercise.id)}
+                >
+                  <span className="swatch" style={{ background: colors.get(line.exercise.id) ?? "var(--series-other)" }} />
+                  {line.exercise.name}
+                  {line.exercise.unit === "plates" && <span className="archived">plates</span>}
+                  {line.exercise.archived && <span className="archived">old</span>}
+                </button>
+              ))}
+            </div>
+          </section>
           {visible.length > 0 && <DataTable lines={visible} />}
         </>
       )}
-    </>
+    </div>
   );
 }
 
@@ -143,7 +162,7 @@ function DataTable({ lines }: { lines: ProgressLine[] }) {
     return p ? p.label : "";
   };
   return (
-    <details style={{ marginTop: 14 }}>
+    <details className="tile table-tile">
       <summary>Show as a table</summary>
       <div className="table-scroll">
         <table className="data-table">

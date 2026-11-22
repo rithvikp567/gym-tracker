@@ -45,14 +45,15 @@ export function Sheet({ title, onClose, children }: { title: string; onClose: ()
   );
 }
 
+/** A page's title, centered, with its sub line; `actions` (Done, Close) sit at the right. */
 export function ScreenHead({ title, sub, actions }: { title: ReactNode; sub?: ReactNode; actions?: ReactNode }) {
   return (
     <header className="screen-head">
-      <div>
+      <div className="head-text">
         <h1>{title}</h1>
         {sub && <div className="sub">{sub}</div>}
       </div>
-      {actions}
+      {actions && <div className="head-actions">{actions}</div>}
     </header>
   );
 }
