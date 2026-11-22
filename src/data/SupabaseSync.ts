@@ -21,6 +21,8 @@ const OVERLAP_MS = 5_000;
 const PREFS_KEY = "gym_tracker_prefs";
 /** Edits sync every few seconds; in between, the account's preferences are re-read at most this often. */
 const PREFS_REFRESH_MS = 60_000;
+/** Coming back to a window that stayed visible re-reads them at most this often. */
+const PREFS_FOCUS_MS = 15_000;
 
 /**
  * Supabase account (email + password) + two-way sync of the local store.
@@ -30,7 +32,9 @@ const PREFS_REFRESH_MS = 60_000;
  *  pull: download rows changed since the last pull (by server time) and apply the ones newer
  *        than what's on this device.
  *  prefs: keep the preferences (color style…) in step with the account's user metadata,
- *        newest change wins (TASKS.md D20).
+ *        setting by setting, newest change wins (TASKS.md D20). Re-read on app open, back in
+ *        front, sign-in and the Sync button; on window focus at most every 15 s (without a
+ *        full sync); otherwise at most once a minute.
  */
 export class SupabaseSync implements SyncController {
   readonly configured = true;
@@ -45,9 +49,13 @@ export class SupabaseSync implements SyncController {
   /** Bumped on every local preference change; compared with the last version synced. */
   private prefsVersion = 0;
   private prefsSyncedVersion = 0;
-  /** Re-read the account's preferences on the next sync (app opened, back in front, signed in). */
+  /** Re-read the account's preferences on the next sync (app opened, back in front, signed in, Sync pressed). */
   private prefsCheckDue = true;
   private prefsCheckedAt = 0;
+  /** When a window focus last asked for a check, so switching windows back and forth can't flood the network. */
+  private prefsFocusAt = 0;
+  /** Preference syncs run one at a time: a focus check can overlap a full sync. */
+  private prefsQueue: Promise<void> = Promise.resolve();
 
   constructor(
     url: string,
@@ -69,6 +77,8 @@ export class SupabaseSync implements SyncController {
       this.prefsCheckDue = true;
       this.requestSync(0);
     });
+    // A desktop window that stays visible gets no visibilitychange while you use your phone.
+    window.addEventListener("focus", () => this.checkPreferencesOnFocus());
   }
 
   status(): SyncStatus {
@@ -109,20 +119,33 @@ export class SupabaseSync implements SyncController {
   requestSync(delayMs = 1500): void {
     if (!this.userId) return;
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => void this.syncNow(), delayMs);
+    this.timer = setTimeout(() => void this.start(), delayMs);
   }
 
+  /** The Sync button: a full sync that also re-reads the account's preferences, however recently they were checked. */
   async syncNow(): Promise<void> {
-    if (!this.userId) return;
+    this.prefsCheckDue = true;
+    const joined = this.running !== null;
+    await this.start();
+    // The sync under way may have read the account before the press: wait for the one it queued.
+    if (joined) await this.running;
+  }
+
+  /** Starts a sync, or joins the one under way and queues another after it. */
+  private start(): Promise<void> {
+    if (!this.userId) return Promise.resolve();
     if (this.running) {
       this.again = true;
       return this.running;
     }
+    // This sync sends whatever a pending timer was waiting to send.
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
     this.running = this.run().finally(() => {
       this.running = null;
       if (this.again) {
         this.again = false;
-        this.requestSync(0);
+        void this.start();
       }
     });
     return this.running;
@@ -201,27 +224,50 @@ export class SupabaseSync implements SyncController {
     if (changed) this.onRemoteChange();
   }
 
-  /** Compares this device's preferences with the account's copy and keeps the newer one. */
-  private async syncPreferences(): Promise<void> {
+  /**
+   * Back in a window that stayed visible (a desktop browser while you used your phone): re-read
+   * the account's preferences, at most every 15 s and without a full sync. The status is left
+   * alone, since no records were synced.
+   */
+  private checkPreferencesOnFocus(): void {
+    if (!this.userId || !navigator.onLine) return;
+    if (isRecent(this.prefsCheckedAt, PREFS_FOCUS_MS) || isRecent(this.prefsFocusAt, PREFS_FOCUS_MS)) return;
+    this.prefsFocusAt = Date.now();
+    this.prefsCheckDue = true;
+    this.syncPreferences().catch((e: unknown) => console.warn("Preferences didn't sync", e));
+  }
+
+  /** Preference syncs, one at a time, each looking at the state when its turn comes. */
+  private syncPreferences(): Promise<void> {
+    const turn = this.prefsQueue.then(() => this.mergePreferences());
+    this.prefsQueue = turn.catch(() => undefined);
+    return turn;
+  }
+
+  /** Merges this device's preferences with the account's copy, setting by setting, and stores the result on whichever side lacked it. */
+  private async mergePreferences(): Promise<void> {
     const prefs = this.prefs;
-    if (!prefs) return;
+    if (!prefs || !this.userId) return;
     const version = this.prefsVersion;
     const changedHere = version !== this.prefsSyncedVersion;
-    if (!changedHere && !this.prefsCheckDue && Date.now() - this.prefsCheckedAt < PREFS_REFRESH_MS) return;
-
-    const { data, error } = await this.client.auth.getUser();
-    if (error) throw error;
-    const remote = readPreferences(data.user?.user_metadata?.[PREFS_KEY]);
-    const local = prefs.snapshot();
-    const action = reconcilePreferences(local, remote);
-    if (action === "adopt" && remote) {
-      prefs.applyRemote(remote);
-    } else if (action === "push") {
-      const { error: updateError } = await this.client.auth.updateUser({ data: { [PREFS_KEY]: local } });
-      if (updateError) throw updateError;
+    const due = this.prefsCheckDue;
+    if (!changedHere && !due && isRecent(this.prefsCheckedAt, PREFS_REFRESH_MS)) return;
+    // Cleared before reading, so a request that arrives during the read gets a read of its own.
+    this.prefsCheckDue = false;
+    try {
+      const { data, error } = await this.client.auth.getUser();
+      if (error) throw error;
+      const plan = reconcilePreferences(prefs.snapshot(), readPreferences(data.user?.user_metadata?.[PREFS_KEY]));
+      if (plan.apply) prefs.applyRemote(plan.merged);
+      if (plan.push) {
+        const { error: updateError } = await this.client.auth.updateUser({ data: { [PREFS_KEY]: plan.merged } });
+        if (updateError) throw updateError;
+      }
+    } catch (e) {
+      if (due) this.prefsCheckDue = true;
+      throw e;
     }
     this.prefsSyncedVersion = version;
-    this.prefsCheckDue = false;
     this.prefsCheckedAt = Date.now();
   }
 
@@ -239,17 +285,29 @@ export class SupabaseSync implements SyncController {
 
   private onAuth(session: AuthSession | null): void {
     const user = session?.user ?? null;
-    const isNewUser = (user?.id ?? null) !== this.userId;
+    const email = user?.email ?? null;
+    if ((user?.id ?? null) === this.userId) {
+      // Same account: a token refresh, the tab back in front, or a settings upload (USER_UPDATED).
+      // The status still describes the last sync, so only a new email is news.
+      if (email !== this.current.email) this.set({ email });
+      return;
+    }
     this.userId = user?.id ?? null;
-    if (user && isNewUser) this.prefsCheckDue = true;
-    this.set({ state: user ? "idle" : "signed-out", email: user?.email ?? null, message: null });
-    if (user && isNewUser) this.requestSync(0);
+    if (user) this.prefsCheckDue = true;
+    this.set({ state: user ? "idle" : "signed-out", email, message: null });
+    if (user) this.requestSync(0);
   }
 
   private set(changes: Partial<SyncStatus>): void {
     this.current = { ...this.current, ...changes };
     this.emitter.emit(this.current);
   }
+}
+
+/** Whether `at` (ms) was less than `ms` ago. A time still ahead (the clock was turned back since) has passed. */
+function isRecent(at: number, ms: number): boolean {
+  const elapsed = Date.now() - at;
+  return elapsed >= 0 && elapsed < ms;
 }
 
 /** Supabase's auth messages, reworded for the few cases a person will actually hit. */

@@ -73,18 +73,27 @@ export interface SyncStatus {
 
 /**
  * Preferences that follow the account to the user's other devices (color style…), as one
- * snapshot. The newest change wins, like records.
+ * snapshot. Each setting keeps the time it last changed, and the newest change to each
+ * setting wins, so changing one setting never undoes another device's newer change to another.
  */
 export interface PreferencesSnapshot {
   values: Record<string, unknown>;
-  /** ISO time of the last change on any device; EPOCH = never changed (still the defaults). */
+  /** ISO time of the newest change to any setting; EPOCH = never changed (still the defaults). */
   updatedAt: string;
+  /**
+   * ISO time each setting last changed, on any device. Copies saved before settings were
+   * stamped one by one have none: a setting without a stamp counts as changed at `updatedAt`.
+   */
+  stamps?: Record<string, string>;
 }
 
 /** Implemented by SettingsService; read and updated by sync. */
 export interface SyncedPreferences {
   snapshot(): PreferencesSnapshot;
-  /** Applies a newer copy from another device without queueing it for upload again. */
+  /**
+   * Applies another device's copy (the settings it lists, with their stamps) without queueing
+   * it for upload again. Settings it doesn't list keep their value here.
+   */
   applyRemote(snapshot: PreferencesSnapshot): void;
   /** Fires after a change made on this device. */
   onLocalChange(listener: () => void): Unsubscribe;
@@ -101,6 +110,7 @@ export interface SyncController {
   /** Creates the account and signs in (Supabase's "Confirm email" must be off; no email is sent). */
   createAccount(email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
+  /** A sync the person asked for (the Sync button): also re-reads the account's preferences. */
   syncNow(): Promise<void>;
   /** Called after local writes; implementations debounce. */
   requestSync(): void;

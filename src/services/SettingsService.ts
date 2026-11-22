@@ -16,6 +16,7 @@ export interface Settings {
 }
 
 const DEFAULTS: Settings = { theme: "oled", showLastSession: true };
+const SETTING_KEYS = Object.keys(DEFAULTS) as (keyof Settings)[];
 const KEY = "gym-tracker.settings";
 
 /**
@@ -24,18 +25,27 @@ const KEY = "gym-tracker.settings";
  */
 const PRE_SYNC_CHOICE = "1970-01-01T00:00:00.001Z";
 
+/** The latest time a Date can hold. */
+const LATEST_TIME = 8.64e15;
+
+/** ISO time each setting last changed, here or on another device. */
+type Stamps = Record<keyof Settings, string>;
+
 interface Stored extends Partial<Settings> {
+  /** The newest stamp. Copies saved before settings were stamped one by one have only this. */
   updatedAt?: string;
+  stamps?: Partial<Stamps>;
 }
 
 /**
  * The user's preferences. Saved on this device right away and, when signed in, kept in step
  * with the account so the color style follows you between phone and computer (TASKS.md D20).
+ * Each setting carries its own stamp, so devices merge them one by one.
  * Add new options to `Settings`, `DEFAULTS`, and `sanitize`.
  */
 export class SettingsService implements SyncedPreferences {
   private current: Settings;
-  private updatedAt: string;
+  private stamps: Stamps;
   private readonly emitter = new Emitter<Settings>();
   private readonly localChanges = new Emitter();
 
@@ -45,16 +55,24 @@ export class SettingsService implements SyncedPreferences {
   ) {
     const saved = this.read();
     this.current = sanitize(saved);
-    this.updatedAt = typeof saved.updatedAt === "string" ? saved.updatedAt : hasChoice(saved) ? PRE_SYNC_CHOICE : EPOCH;
+    // A setting saved without its own stamp dates from the whole copy's time; one never saved
+    // here (added in a later version) is still an untouched default.
+    const savedAt = isoTime(saved.updatedAt) ?? PRE_SYNC_CHOICE;
+    this.stamps = Object.fromEntries(
+      SETTING_KEYS.map((k) => [k, isoTime(saved.stamps?.[k]) ?? (Object.hasOwn(saved, k) ? savedAt : EPOCH)]),
+    ) as Stamps;
   }
 
   get(): Settings {
     return this.current;
   }
 
+  /** Stamps only the settings in `changes`, so syncing them can't undo another device's newer change to a different one. */
   update(changes: Partial<Settings>): void {
+    const now = this.clock.now();
+    const changed = SETTING_KEYS.filter((k) => k in changes);
     this.current = sanitize({ ...this.current, ...changes });
-    this.updatedAt = this.clock.now().toISOString();
+    this.stamps = { ...this.stamps, ...Object.fromEntries(changed.map((k) => [k, nextStamp(this.stamps[k], now)])) };
     this.save();
     this.localChanges.emit();
   }
@@ -64,12 +82,17 @@ export class SettingsService implements SyncedPreferences {
   }
 
   snapshot(): PreferencesSnapshot {
-    return { values: { ...this.current }, updatedAt: this.updatedAt };
+    return { values: { ...this.current }, updatedAt: newest(this.stamps), stamps: { ...this.stamps } };
   }
 
   applyRemote(snapshot: PreferencesSnapshot): void {
+    const listed = SETTING_KEYS.filter((k) => Object.hasOwn(snapshot.values, k));
+    const copyAt = isoTime(snapshot.updatedAt);
     this.current = sanitize({ ...this.current, ...(snapshot.values as Partial<Settings>) });
-    this.updatedAt = snapshot.updatedAt;
+    this.stamps = {
+      ...this.stamps,
+      ...Object.fromEntries(listed.map((k) => [k, isoTime(snapshot.stamps?.[k]) ?? copyAt ?? this.stamps[k]])),
+    };
     this.save();
   }
 
@@ -78,7 +101,7 @@ export class SettingsService implements SyncedPreferences {
   }
 
   private save(): void {
-    const stored: Stored = { ...this.current, updatedAt: this.updatedAt };
+    const stored: Stored = { ...this.current, updatedAt: newest(this.stamps), stamps: this.stamps };
     this.store.set(KEY, JSON.stringify(stored));
     this.emitter.emit(this.current);
   }
@@ -101,8 +124,26 @@ function sanitize(values: Partial<Record<keyof Settings, unknown>>): Settings {
   };
 }
 
-function hasChoice(saved: Stored): boolean {
-  return saved.theme !== undefined || saved.showLastSession !== undefined;
+/**
+ * The stamp for a change made here: now, but never earlier than 1 ms after the stamp it
+ * replaces. A copy adopted from a device whose clock runs ahead carries a stamp in this
+ * device's future; a change made after adopting it must still outrank it.
+ */
+function nextStamp(previous: string, now: Date): string {
+  const before = Date.parse(previous);
+  const at = Math.max(now.getTime(), Number.isFinite(before) ? before + 1 : 0);
+  return new Date(Math.min(at, LATEST_TIME)).toISOString();
+}
+
+/** The newest stamp, which is the whole copy's `updatedAt`. */
+function newest(stamps: Stamps): string {
+  return SETTING_KEYS.map((k) => stamps[k]).reduce((a, b) => (Date.parse(b) > Date.parse(a) ? b : a), EPOCH);
+}
+
+/** `value` as an ISO time, or undefined when it isn't a time (a damaged or hand-edited copy). */
+function isoTime(value: unknown): string | undefined {
+  const at = typeof value === "string" ? Date.parse(value) : NaN;
+  return Number.isFinite(at) ? new Date(at).toISOString() : undefined;
 }
 
 /** localStorage, falling back to memory where it's blocked (private mode). */
