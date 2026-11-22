@@ -27,8 +27,9 @@ export interface SessionRepository {
   saveMany(sessions: Session[]): Promise<void>;
   /**
    * Saves corrections to stored sessions (SetupService.reconcile) dated 1 ms after the copy each
-   * was made from, not now: an edit made on any device after that copy still wins in sync, and
-   * two devices correcting the same copy save the same record.
+   * was made from, not now: an edit made on any device after that copy still wins in sync. Two
+   * devices that correct the same copy differently (each before hearing the other's merge or
+   * delete) save the same stamp; sync settles such a tie on the server's copy.
    */
   saveRepairs(sessions: Session[]): Promise<void>;
 }

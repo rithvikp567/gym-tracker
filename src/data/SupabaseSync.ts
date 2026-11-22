@@ -4,6 +4,7 @@ import { Emitter, type Unsubscribe } from "../lib/Emitter";
 import type { SyncController, SyncedPreferences, SyncStatus } from "../services/ports";
 import { readPreferences, reconcilePreferences } from "./preferenceSync";
 import { TABLES, type RecordStore, type TableName } from "./RecordStore";
+import { takesRemote } from "./recordSync";
 
 interface RemoteRow {
   id: string;
@@ -30,7 +31,7 @@ const PREFS_FOCUS_MS = 15_000;
  *  push: upload every record in the outbox (upsert; the server keeps whichever copy has the
  *        newer `updated_at`, see supabase/migrations).
  *  pull: download rows changed since the last pull (by server time) and apply the ones newer
- *        than what's on this device.
+ *        than what's on this device (on a tie, the server's copy: see recordSync.takesRemote).
  *  prefs: keep the preferences (color style…) in step with the account's user metadata,
  *        setting by setting, newest change wins (TASKS.md D20). Re-read on app open, back in
  *        front, sign-in and the Sync button; on window focus at most every 15 s (without a
@@ -271,16 +272,20 @@ export class SupabaseSync implements SyncController {
     this.prefsCheckedAt = Date.now();
   }
 
-  /** Keeps whichever copy was edited last. Returns true if anything local changed. */
+  /**
+   * Keeps whichever copy was edited last; on a tie, the server's copy unless this device's own is
+   * still waiting to upload (takesRemote). Returns true if anything local changed.
+   */
   private async apply(table: TableName, rows: RemoteRow[]): Promise<boolean> {
-    const newer: Syncable[] = [];
+    const waiting = new Set((await this.store.outbox()).filter((e) => e.table === table).map((e) => e.id));
+    const taken: Syncable[] = [];
     for (const row of rows) {
       const remote: Syncable = { ...row.data, id: row.id, updatedAt: new Date(row.updated_at).toISOString(), deleted: row.deleted };
       const local = await this.store.get(table, row.id);
-      if (!local || Date.parse(remote.updatedAt) > Date.parse(local.updatedAt)) newer.push(remote);
+      if (takesRemote(remote, local, waiting.has(row.id))) taken.push(remote);
     }
-    if (newer.length) await this.store.putMany(table, newer, "remote");
-    return newer.length > 0;
+    if (taken.length) await this.store.putMany(table, taken, "remote");
+    return taken.length > 0;
   }
 
   private onAuth(session: AuthSession | null): void {

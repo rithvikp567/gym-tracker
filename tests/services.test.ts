@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { MemoryRecordStore } from "../src/data/MemoryRecordStore";
 import { TABLES, type TableName } from "../src/data/RecordStore";
+import { takesRemote } from "../src/data/recordSync";
 import { StoreRepositories } from "../src/data/StoreRepositories";
 import { ExerciseLog } from "../src/domain/ExerciseLog";
 import { EPOCH, type Syncable } from "../src/domain/ids";
@@ -274,6 +275,25 @@ describe("SetupService exercise management", () => {
     expect(line!.points.map((p) => p.weight)).toEqual([300, 310]); // not 27,000 lb
   });
 
+  it("re-imports a merged name's note-only row without a unit, like the merge filed it", async () => {
+    const imports = new ImportService(repos);
+    const plan = lowerSheet(
+      ["2026-03-03", [row("legpressplates", 2.5, 8)]],
+      ["2026-03-10", [{ key: "legpress", sets: [], done: null, note: "sled taken" }]],
+    );
+    await imports.apply(plan);
+    const day = (await setup.days())[0]!;
+    const [press, oldPress] = day.allExercises();
+    await setup.setUnit(day.id, press!.id, "plates", "relabel");
+    await setup.mergeExercise(day.id, oldPress!.id, press!.id);
+    const noteDay = async () => (await sessions.find(day.id, d("2026-03-10")))!.log(press!.id)!;
+    expect([(await noteDay()).note, (await noteDay()).unit]).toEqual(["sled taken", undefined]);
+
+    await imports.apply(plan);
+    // Weights typed into that day later are plates, like the rest of the exercise.
+    expect([(await noteDay()).note, (await noteDay()).unit]).toEqual(["sled taken", undefined]);
+  });
+
   it("re-imports rows in pounds after switching to plates with \"keep those in pounds\"", async () => {
     const imports = new ImportService(repos);
     const plan = lowerSheet(["2026-03-03", [row("legpressplates", 360, 10)]]);
@@ -430,7 +450,7 @@ describe("Logs that sync in after a merge or delete", () => {
   const worldClock: Clock = { now: () => new Date(now) };
   /**
    * Stand-in for Supabase: an upload replaces the server's copy unless it is older (the keep_newest
-   * trigger), and a download replaces the device's copy only when it is newer (SupabaseSync.apply).
+   * trigger), and a download replaces the device's copy by SupabaseSync.apply's rule (takesRemote).
    */
   let server: Map<string, { table: TableName; record: Syncable }>;
 
@@ -456,13 +476,15 @@ describe("Logs that sync in after a merge or delete", () => {
       }
     }
     await store.clearOutbox(outbox);
+    const waiting = new Set((await store.outbox()).map((e) => `${e.table}/${e.id}`));
     for (const table of TABLES) {
-      const newer: Syncable[] = [];
+      const taken: Syncable[] = [];
       for (const { table: t, record } of server.values()) {
-        const local = t === table ? await store.get(table, record.id) : null;
-        if (t === table && (!local || Date.parse(record.updatedAt) > Date.parse(local.updatedAt))) newer.push(structuredClone(record));
+        if (t !== table) continue;
+        const local = await store.get(table, record.id);
+        if (takesRemote(record, local, waiting.has(`${table}/${record.id}`))) taken.push(structuredClone(record));
       }
-      if (newer.length) await store.putMany(table, newer, "remote");
+      if (taken.length) await store.putMany(table, taken, "remote");
     }
     now += 60_000;
   }
@@ -561,6 +583,38 @@ describe("Logs that sync in after a merge or delete", () => {
       const summaries = new Map(session?.logs.map((l) => [l.exerciseId, l.summary()]));
       expect(summaries).toEqual(new Map([[press!.id, "320 · 10/8"], [squat!.id, "225 · 5/5"]]));
       expect(await dev.setup.reconcile()).toBe(0);
+    }
+  });
+
+  it("puts every device on one copy when two repaired it differently", async () => {
+    const { desktop, phone, day, exercises } = await lowerOnBoth("Leg Press", "Legpress");
+    const [press, oldPress] = exercises;
+    const laptop = device();
+    await sync(laptop);
+    const date = d("2026-11-18");
+    // Offline at the gym, the phone logs both names; then it uploads that copy.
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(oldPress!.id).withSets(sets(320, 10)));
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(press!.id).withSets(sets(300, 10)));
+    await sync(phone);
+    // Before either hears of the other, the laptop merges the old name away and the desktop deletes it.
+    await laptop.setup.mergeExercise(day.id, oldPress!.id, press!.id);
+    now += 60_000;
+    await desktop.setup.deleteExercise(day.id, oldPress!.id);
+    // Each downloads the phone's copy and repairs it its own way, with the same stamp.
+    await sync(laptop);
+    await sync(desktop);
+    expect(await laptop.setup.reconcile()).toBe(1);
+    expect(await desktop.setup.reconcile()).toBe(1);
+    const shown = async (dev: Device) => (await dev.sessions.find(day.id, date))?.logs.map((l) => [l.exerciseId, l.summary()]);
+    expect(await shown(laptop)).toEqual([[press!.id, "300/320 · 10/10"]]);
+    expect(await shown(desktop)).toEqual([[press!.id, "300 · 10"]]);
+
+    // The desktop's repair reaches the server last; a round of syncs later, everyone has it.
+    for (const dev of [laptop, desktop, phone, laptop, desktop, phone]) await sync(dev);
+    for (const dev of [laptop, desktop, phone]) {
+      expect(await shown(dev)).toEqual([[press!.id, "300 · 10"]]);
+      expect(await dev.setup.reconcile()).toBe(0);
+      expect(await dev.store.outbox()).toEqual([]);
     }
   });
 

@@ -153,12 +153,17 @@ function DayCard({
     const otherUnit: LoadUnit = into.unit === "plates" ? "lb" : "plates";
     // Both logged in one unit: a later unit switch can't tell their numbers apart (a shared day is
     // one log), so a name that was really in the other unit has to be switched before the merge.
-    const bothLogged = sessionsOf(from) !== 0 && sessionsOf(into) !== 0;
+    // Across units the moved sessions keep their unit for good, so the same goes for "from".
+    const fromLogged = sessionsOf(from) !== 0;
+    const bothLogged = fromLogged && sessionsOf(into) !== 0;
     const units =
       from.kind !== "strength"
         ? ""
         : from.unit !== into.unit
-          ? ` "${from.name}" is logged in ${unitName(from.unit)} and "${into.name}" in ${unitName(into.unit)}: each session keeps its unit, and a day with weights under both is combined in pounds.`
+          ? ` "${from.name}" is logged in ${unitName(from.unit)} and "${into.name}" in ${unitName(into.unit)}: each session keeps its unit, and a day with weights under both is combined in pounds.` +
+            (fromLogged
+              ? ` If the numbers under "${from.name}" are really ${unitName(into.unit)}, cancel and switch it first (⋮ → Log in ${unitName(into.unit)}): after merging, they stay ${unitName(from.unit)}.`
+              : "")
           : bothLogged
             ? ` Both are logged in ${unitName(into.unit)}. If only one of them was really logged in ${unitName(otherUnit)}, cancel and switch that one first (⋮ → Log in ${unitName(otherUnit)}): after merging, their numbers can't be told apart.`
             : "";
