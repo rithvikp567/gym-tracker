@@ -4,6 +4,7 @@ import { unitName, type LoadUnit } from "../../domain/Load";
 import { WEEKDAY_SHORT, type Weekday } from "../../domain/LocalDate";
 import type { Split } from "../../domain/Split";
 import type { WorkoutDay } from "../../domain/WorkoutDay";
+import { usePageHold } from "../components/CenterBlock";
 import { Icon } from "../components/Icon";
 import { BackLink, ScreenHead } from "../components/controls";
 import { useLive, useServices } from "../ServicesContext";
@@ -21,6 +22,14 @@ export function SetupScreen({ openDayId }: { openDayId?: string | undefined }) {
   const data = useLive(async () => ({ days: await setup.days(), split: await setup.split() }), [], "setup");
   const [newDay, setNewDay] = useState("");
   const [openIds, setOpenIds] = useState<ReadonlySet<string>>(() => new Set(openDayId ? [openDayId] : []));
+  // Whether you have opened, closed or added a day here (the day Progress → Edit opened doesn't count).
+  const [touched, setTouched] = useState(false);
+  // The page is centered: while a day is open it holds its place, so the card you tapped stays put
+  // as it grows. Only once you've tapped: the day the route opened is scrolled into view instead,
+  // and a hold starting as the page first draws would keep the offset of the "Loading…"
+  // placeholder (a band of empty panel above the title). Only days that still exist count, so
+  // deleting the open day lets go.
+  usePageHold(touched && Boolean(data?.days.some((d) => openIds.has(d.id))));
 
   // Coming from another screen to edit one day: bring its card into view.
   const ready = Boolean(data);
@@ -30,19 +39,22 @@ export function SetupScreen({ openDayId }: { openDayId?: string | undefined }) {
 
   if (!data) return <div className="loading">Loading…</div>;
 
-  const toggle = (id: string) =>
+  const toggle = (id: string) => {
+    setTouched(true);
     setOpenIds((ids) => {
       const next = new Set(ids);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+  };
 
   const addDay = async () => {
     const name = newDay.trim();
     if (!name) return;
     const day = await setup.createDay(name);
     setNewDay("");
+    setTouched(true);
     setOpenIds((ids) => new Set(ids).add(day.id)); // a new day opens so you can add exercises
   };
 

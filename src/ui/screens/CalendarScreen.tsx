@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { LocalDate, MONTH_LONG, WEEKDAY_LETTER } from "../../domain/LocalDate";
 import type { CalendarDay } from "../../services/CalendarService";
+import { useHoldBriefly } from "../components/CenterBlock";
 import { Icon } from "../components/Icon";
 import { Sheet } from "../components/controls";
 import { useViewState } from "../hooks/useViewState";
 import { href, navigate } from "../router";
 import { useLive, useServices } from "../ServicesContext";
+import type { SlideDirection } from "../slide";
 
 /** Every date of a year, grouped by month (Jan = 0). Drawn before the data loads so nothing jumps. */
 function monthsOf(year: number): LocalDate[][] {
@@ -23,6 +25,10 @@ export function CalendarScreen({ year: routeYear }: { year: number | null }) {
     if (year !== lastYear) setLastYear(year);
   }, [year, lastYear, setLastYear]);
   const [picked, setPicked] = useState<CalendarDay | null>(null);
+  const holdBriefly = useHoldBriefly();
+  // A year switch slides the months in from the side it came from (‹ from the left, › from the right).
+  const [shown, setShown] = useState<{ year: number; slide: SlideDirection | null }>({ year, slide: null });
+  if (shown.year !== year) setShown({ year, slide: year < shown.year ? "back" : "forward" });
 
   const data = useLive(
     async () => {
@@ -48,34 +54,33 @@ export function CalendarScreen({ year: routeYear }: { year: number | null }) {
   };
 
   return (
-    <>
-      <header className="screen-head">
+    <div className="calendar">
+      {/* The year is the page's title: ‹ › around it, the count and the legend under it, on one tile. */}
+      <header className="tile cal-head">
         <div className="year-switch">
-          <a className="icon-btn" href={href({ name: "calendar", year: year - 1 })} aria-label="Previous year">
+          {/* Another year can be a row of weeks taller or shorter: the page holds its place for a moment. */}
+          <a className="icon-btn" href={href({ name: "calendar", year: year - 1 })} aria-label="Previous year" onClick={holdBriefly}>
             <Icon name="left" />
           </a>
-          <span className="year num">{year}</span>
-          <a className="icon-btn" href={href({ name: "calendar", year: year + 1 })} aria-label="Next year">
+          <h1 className="year num">{year}</h1>
+          <a className="icon-btn" href={href({ name: "calendar", year: year + 1 })} aria-label="Next year" onClick={holdBriefly}>
             <Icon name="right" />
           </a>
         </div>
-        <div className="sub num" style={{ alignSelf: "center" }}>
-          {data ? `${workouts} workout${workouts === 1 ? "" : "s"}` : "\u00a0"}
+        <div className="cal-count sub num">{data ? `${workouts} workout${workouts === 1 ? "" : "s"}` : "\u00a0"}</div>
+        <div className="legend">
+          <span>
+            <span className="dot done" /> Workout
+          </span>
+          <span>
+            <span className="dot missed" /> Missed planned day
+          </span>
         </div>
       </header>
 
-      <div className="legend">
-        <span>
-          <span className="dot done" /> Workout
-        </span>
-        <span>
-          <span className="dot missed" /> Missed planned day
-        </span>
-      </div>
-
-      <div className="months">
+      <div key={year} className={`months${shown.slide ? ` slide-${shown.slide}` : ""}`}>
         {months.map((dates, m) => (
-          <section className="month" key={m} aria-label={MONTH_LONG[m]}>
+          <section className="tile month" key={m} aria-label={MONTH_LONG[m]}>
             <h3>{MONTH_LONG[m]}</h3>
             <div className="month-grid">
               {WEEKDAY_LETTER.map((l, i) => (
@@ -111,7 +116,7 @@ export function CalendarScreen({ year: routeYear }: { year: number | null }) {
           <DayDetails day={picked} nameOf={nameOf} workoutDays={data.workoutDays.map((d) => ({ id: d.id, name: d.name }))} />
         </Sheet>
       )}
-    </>
+    </div>
   );
 }
 
