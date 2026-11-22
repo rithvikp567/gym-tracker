@@ -5,7 +5,7 @@ import { BackButton } from "../../components/controls";
 import { Icon } from "../../components/Icon";
 import { useSwipe } from "../../hooks/useSwipe";
 import { href, navigate } from "../../router";
-import { useLive, useServices, useSettings } from "../../ServicesContext";
+import { useLiveState, useServices, useSettings } from "../../ServicesContext";
 import { slideNext, useSlide } from "../../slide";
 import { rememberHomeDay } from "../../homePick";
 import { ExerciseRow } from "./ExerciseRow";
@@ -29,8 +29,9 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
   const slide = useSlide(`${dayId}/${iso}`);
   const stepDay = useDayStep(date, dayId);
 
-  const days = useLive(() => services.setup.days(), [], "days");
-  const data = useLive(
+  const daysLive = useLiveState(() => services.setup.days(), [], "days");
+  const days = daysLive.value;
+  const live = useLiveState(
     async () => {
       const [session, prev, next, last] = await Promise.all([
         services.sessions.open(dayId, date),
@@ -43,6 +44,7 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
     [dayId, date.toString()],
     "session",
   );
+  const data = live.value;
 
   const nextDate = data?.next?.date ?? (date.isBefore(today) ? today : null);
   const prevDate = data?.prev?.date ?? null;
@@ -64,7 +66,9 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
   });
 
   const day = days?.find((d) => d.id === dayId);
-  if (days && !day) {
+  // Only from fresh data: a copy from before the day was added would miss it. Until then the
+  // usual screen draws, without the name or rows.
+  if (days && !day && daysLive.fresh) {
     return (
       <div className="empty">
         <p>This workout day doesn't exist anymore.</p>
@@ -79,6 +83,7 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
   const exercises = day
     ? [...day.activeExercises(), ...day.allExercises().filter((e) => e.archived && session?.log(e.id)?.hasContent())]
     : [];
+  const hasContent = session?.hasContent() ?? false;
   const isToday = date.equals(today);
   const toggleNote = (id: string) =>
     setNoteIds((ids) => {
@@ -168,7 +173,8 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
                     />
                   ))}
                 </div>
-                {!exercises.length && day && (
+                {/* Only from fresh data: a copy from before you added exercises would show it by mistake. */}
+                {!exercises.length && day && daysLive.fresh && live.fresh && (
                   <div className="empty">
                     <p>No exercises on {day.name} yet.</p>
                     <a className="btn" href={href({ name: "setup", dayId })}>
@@ -176,20 +182,20 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
                     </a>
                   </div>
                 )}
-                {session?.hasContent() && (
-                  <div className="session-foot">
-                    <button
-                      type="button"
-                      className="btn danger"
-                      onClick={() => {
-                        if (confirm(`Delete ${day?.name ?? "this workout"} on ${date.shortLabel()}?`))
-                          void services.sessions.delete(dayId, date);
-                      }}
-                    >
-                      <Icon name="trash" size={16} /> Delete this session
-                    </button>
-                  </div>
-                )}
+                {/* Always there, hidden until something is logged: the centered list keeps its height, so it doesn't jump. */}
+                <div className={`session-foot${hasContent ? "" : " is-hidden"}`} aria-hidden={hasContent ? undefined : true}>
+                  <button
+                    type="button"
+                    className="btn danger"
+                    disabled={!hasContent}
+                    onClick={() => {
+                      if (confirm(`Delete ${day?.name ?? "this workout"} on ${date.shortLabel()}?`))
+                        void services.sessions.delete(dayId, date);
+                    }}
+                  >
+                    <Icon name="trash" size={16} /> Delete this session
+                  </button>
+                </div>
               </>
             )}
           </CenterBlock>

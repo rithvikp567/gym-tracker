@@ -565,11 +565,32 @@ a.list-row:hover {
   color: var(--accent);
 }
 
+/* "Dec 28, 2026 – Jan 3, 2027" and "| Week 53" never break inside: if the line can't fit
+   beside the arrows and the Today link on a phone, only the week number moves down. */
+.home-head .sub > span {
+  white-space: nowrap;
+}
+
 .home-head-side {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
+}
+
+/* Sync is set up but has nothing to say yet: keep the chip's space so the header doesn't grow when it appears. */
+.home-head-side .chip.is-placeholder {
+  visibility: hidden;
+}
+
+/* Rows still showing the last loaded week while the picked one loads: marked busy at once,
+   dimmed only if it takes a moment, so fast loads never flicker. */
+.home .list[aria-busy="true"] {
+  animation: stale-dim 0.2s ease-out 0.15s forwards;
+}
+
+@keyframes stale-dim {
+  to { opacity: 0.45; }
 }
 
 .week-nav {
@@ -698,6 +719,11 @@ a.list-row:hover {
 .session-foot {
   margin-top: 28px;
   text-align: center;
+}
+
+/* Nothing logged yet: the footer keeps its space, so the centered list doesn't jump when it appears. */
+.session-foot.is-hidden {
+  visibility: hidden;
 }
 
 .date-picker {

@@ -14,16 +14,20 @@ export function WorkoutRows({
   plannedDayId,
   sessions,
   lastDone,
+  busy = false,
 }: {
   days: readonly WorkoutDay[];
   date: LocalDate;
   plannedDayId: string | null;
   /** Sessions on `date`. */
   sessions: readonly Session[];
-  lastDone: ReadonlyMap<string, LocalDate>;
+  /** When each workout day was last done; undefined while that's still loading. */
+  lastDone: ReadonlyMap<string, LocalDate> | undefined;
+  /** The plan and checks are from older data while newer loads (Home dims them if it takes a moment). */
+  busy?: boolean;
 }) {
   return (
-    <div className="list">
+    <div className="list" aria-busy={busy || undefined}>
       {days.map((day) => (
         <DayRow
           key={day.id}
@@ -31,7 +35,7 @@ export function WorkoutRows({
           date={date}
           planned={plannedDayId === day.id}
           logged={sessions.find((s) => s.workoutDayId === day.id)?.isWorkout() ?? false}
-          lastDone={lastDone.get(day.id)}
+          lastDone={lastDone ? (lastDone.get(day.id) ?? null) : undefined}
         />
       ))}
     </div>
@@ -49,7 +53,8 @@ function DayRow({
   date: LocalDate;
   planned: boolean;
   logged: boolean;
-  lastDone: LocalDate | undefined;
+  /** null = never done; undefined = not known yet. */
+  lastDone: LocalDate | null | undefined;
 }) {
   const count = day.activeExercises().length;
   return (
@@ -62,7 +67,7 @@ function DayRow({
         </div>
         <div className="meta num">
           {count} exercise{count === 1 ? "" : "s"}
-          {lastDone ? ` · last ${lastDone.shortLabel()}` : " · not logged yet"}
+          {lastDone ? ` · last ${lastDone.shortLabel()}` : lastDone === null ? " · not logged yet" : ""}
         </div>
       </div>
       <span className="side end">
