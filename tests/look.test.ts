@@ -130,7 +130,8 @@ describe("tokens.css accents", () => {
     );
 
   it("gives every accent a fill and a text color for each family; Ink uses the theme's text and background", () => {
-    for (const a of ACCENTS) expect(Object.keys(accentRule(a.key)).sort(), a.key).toEqual([...ACCENT_TOKENS].sort());
+    // (a preset never sets --accent-text-*: its fills already read as text, so the text color is the fill)
+    for (const a of ACCENTS) expect(Object.keys(accentRule(a.key)).sort(), a.key).toEqual(ACCENT_TOKENS.filter((t) => !t.startsWith("--accent-text")).sort());
     expect(Object.values(accentRule("ink"))).toEqual(["initial", "initial", "initial", "initial"]);
     expect(tokens.get(":root")).toMatchObject(accentRule("lime"));
     // Lime and Blue keep the dark fills OLED and Graphite always had.
@@ -299,21 +300,26 @@ describe("the resolved look", () => {
     expect(look.vars).toEqual(customThemeTokens("#fff3d6").tokens);
   });
 
-  it("gives a Custom accent a fill per family, as picked wherever it reads, with black or white text on it", () => {
-    // Bright yellow reads on dark themes as it is; on light ones it's deepened, like Amber's two fills.
+  it("keeps a Custom accent exactly as picked for fills, with black or white text on it, and moves only its text color where it wouldn't read", () => {
+    // Bright yellow: the fill is the pick in both families; as text it reads on dark themes as it
+    // is, and is deepened (same hue) for light ones, like Amber's two fills.
     const yellow = resolveLook({ ...base, accent: "custom", customAccentColor: "#ffd60a" });
-    expect(yellow.vars).toMatchObject({ "--accent-d": "#ffd60a", "--accent-ink-d": "#000000", "--accent-ink-l": "#ffffff" });
-    const deep = color(yellow.vars["--accent-l"]!);
+    expect(yellow.vars).toMatchObject({ "--accent-d": "#ffd60a", "--accent-l": "#ffd60a", "--accent-ink-d": "#000000", "--accent-ink-l": "#000000" });
+    expect(yellow.vars["--accent-text-d"]).toBeUndefined();
+    const deep = color(yellow.vars["--accent-text-l"]!);
     expect(luminance(deep)).toBeLessThan(luminance(color("#ffd60a")));
     expect(toHsva(deep).h).toBeCloseTo(toHsva(color("#ffd60a")).h, 0);
-    // Picked on a light theme (Lime's light fill), it's lightened for dark ones instead.
+    // A deep olive: the fill stays olive on dark themes too; only its text color is lightened there.
     const olive = resolveLook({ ...base, accent: "custom", customAccentColor: "#3f6a0a" });
-    expect(olive.vars["--accent-l"]).toBe("#3f6a0a");
-    expect(luminance(color(olive.vars["--accent-d"]!))).toBeGreaterThan(luminance(color("#3f6a0a")));
-    // Faint yellow over black looks dark: white text. It keeps its opacity.
+    expect(olive.vars).toMatchObject({ "--accent-l": "#3f6a0a", "--accent-d": "#3f6a0a" });
+    expect(olive.vars["--accent-text-l"]).toBeUndefined();
+    expect(luminance(color(olive.vars["--accent-text-d"]!))).toBeGreaterThan(luminance(color("#3f6a0a")));
+    // Faint yellow keeps its opacity as a fill; over black it looks dark, so white text on it. Its
+    // text color is opaque.
     const faint = resolveLook({ ...base, accent: "custom", customAccentColor: "#ffd60a33" });
+    expect(faint.vars["--accent-d"]).toBe("#ffd60a33");
     expect(faint.vars["--accent-ink-d"]).toBe("#ffffff");
-    expect(color(faint.vars["--accent-d"]!).a).toBeCloseTo(0x33 / 255, 5);
+    expect(color(faint.vars["--accent-text-d"]!).a).toBe(1);
     expect(accentFillToken("light")).toBe("--accent-l");
     expect(accentFillToken("dark")).toBe("--accent-d");
   });
@@ -327,27 +333,28 @@ describe("the resolved look", () => {
           const look = resolveLook({ ...base, theme: theme ? "custom" : "oled", customThemeColor: theme, accent: "custom", customAccentColor: accent });
           for (const family of ["light", "dark"] as const) {
             const grounds = theme && look.family === family ? GROUNDS_OF(look) : presetGrounds(family);
+            const x = family === "light" ? "l" : "d";
             const fill = color(look.vars[accentFillToken(family)]!);
-            for (const g of grounds) expect(contrast(fill, color(g)), `${accent} on ${theme ?? "presets"} (${family})`).toBeGreaterThanOrEqual(4.5);
-            expect(contrast(color(look.vars[`--accent-ink-${family === "light" ? "l" : "d"}`]!), fill)).toBeGreaterThanOrEqual(4.5);
+            expect(look.vars[accentFillToken(family)]).toBe(accent); // the fill is the pick
+            const text = color(look.vars[`--accent-text-${x}`] ?? look.vars[accentFillToken(family)]!);
+            for (const g of grounds) expect(contrast(text, color(g)), `${accent} on ${theme ?? "presets"} (${family})`).toBeGreaterThanOrEqual(4.5);
+            expect(contrast(color(look.vars[`--accent-ink-${x}`]!), fill)).toBeGreaterThanOrEqual(4.5);
           }
         }
   });
 
-  it("keeps a preset accent on a Custom theme, moving it only where it wouldn't read", () => {
+  it("keeps a preset accent on a Custom theme, moving only its text color where it wouldn't read", () => {
     for (const theme of ["#ff8000", "#48a5f3", "#fff3d6", "#123456", "#3b6fd4", "#2b2b2b"])
       for (const accent of Object.keys(ACCENT_FILLS) as (keyof typeof ACCENT_FILLS)[]) {
         const look = resolveLook({ ...base, theme: "custom", customThemeColor: theme, accent });
-        const token = accentFillToken(look.family);
-        const fill = look.vars[token] ?? ACCENT_FILLS[accent][look.family];
-        for (const g of GROUNDS_OF(look)) expect(contrast(color(fill), color(g)), `${accent} on ${theme}`).toBeGreaterThanOrEqual(4.5);
-        // Only this family's fill is touched, and a moved fill gets its own text color.
-        expect(Object.keys(look.vars).filter((k) => k.startsWith("--accent")).sort()).toEqual(
-          look.vars[token] ? [token, `--accent-ink-${token.slice(-1)}`].sort() : [],
-        );
+        const textToken = `--accent-text-${look.family === "light" ? "l" : "d"}`;
+        const text = look.vars[textToken] ?? ACCENT_FILLS[accent][look.family];
+        for (const g of GROUNDS_OF(look)) expect(contrast(color(text), color(g)), `${accent} on ${theme}`).toBeGreaterThanOrEqual(4.5);
+        // The fill and its text stay tokens.css's; only this family's text color may be set.
+        expect(Object.keys(look.vars).filter((k) => k.startsWith("--accent"))).toEqual(look.vars[textToken] ? [textToken] : []);
       }
-    // Pale cream: Lime's light fill already reads, so tokens.css's fill and text stay.
-    expect(Object.keys(resolveLook({ ...base, theme: "custom", customThemeColor: "#fff3d6", accent: "lime" }).vars)).not.toContain("--accent-l");
+    // Pale cream: Lime's light fill already reads, so nothing about the accent is set.
+    expect(Object.keys(resolveLook({ ...base, theme: "custom", customThemeColor: "#fff3d6", accent: "lime" }).vars).filter((k) => k.startsWith("--accent"))).toEqual([]);
   });
 
   it("moves a fill only as far as it must, and leaves one that reads alone", () => {

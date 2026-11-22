@@ -87,7 +87,7 @@
 }
 
 .tab[aria-current="page"] svg {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* The current tab's mark: one element that glides to whichever tab is current (Shell places it). */
@@ -155,7 +155,7 @@
   }
 
   .brand svg {
-    color: var(--accent);
+    color: var(--accent-text);
   }
 
   .tabs {
@@ -340,7 +340,7 @@
 }
 
 .link {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 14px;
 }
 
@@ -569,7 +569,8 @@ select.field {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--knob);
+  box-shadow: 0 1px 3px var(--knob-shadow);
   transition:
     transform var(--dur) var(--ease-out),
     background-color var(--dur) ease-out;
@@ -827,7 +828,7 @@ button.list-row:active {
 }
 
 .week-day.today .dn {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .week-day[aria-pressed="true"] {
@@ -837,7 +838,7 @@ button.list-row:active {
 
 .tag-planned {
   font-size: 12px;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* The sync status under the rows. Sync is set up but has nothing to say yet: keep the chip's
@@ -1094,7 +1095,7 @@ button.list-row:active {
 .note-btn {
   display: inline-grid;
   place-items: center;
-  color: var(--accent);
+  color: var(--accent-text);
   padding: 2px;
   margin: -2px 0;
 }
@@ -1116,7 +1117,7 @@ button.list-row:active {
   grid-area: weight;
   justify-self: end;
   font-size: 18px;
-  color: var(--accent);
+  color: var(--accent-text);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1438,7 +1439,7 @@ button.list-row:active {
 }
 
 .cal-day.today {
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 

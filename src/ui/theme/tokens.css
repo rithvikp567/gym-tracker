@@ -229,6 +229,7 @@
   color-scheme: dark;
   --accent: var(--accent-d, var(--text));
   --accent-ink: var(--accent-ink-d, var(--bg));
+  --accent-text: var(--accent-text-d, var(--accent));
   --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --accent-line: color-mix(in srgb, var(--accent) 35%, var(--tile-line));
 }
@@ -237,6 +238,7 @@
   color-scheme: light;
   --accent: var(--accent-l, var(--text));
   --accent-ink: var(--accent-ink-l, var(--bg));
+  --accent-text: var(--accent-text-l, var(--accent));
   --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
   --accent-line: color-mix(in srgb, var(--accent) 35%, var(--tile-line));
 }
@@ -261,6 +263,10 @@
   --series-7: #9085e9;
   --series-8: #e66767;
   --series-other: #6f6f75;
+
+  /* A switch's knob: white in every theme, with a shadow so it shows on a light track. */
+  --knob: #ffffff;
+  --knob-shadow: rgba(0, 0, 0, 0.28);
 
   --radius: 12px;
   --radius-sm: 8px;

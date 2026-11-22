@@ -96,8 +96,11 @@ export const THEME_TOKENS = [
   "--chart-axis",
 ] as const;
 
-/** What a Custom accent sets on <html>: its fill and the text on it, for both families. */
-export const ACCENT_TOKENS = ["--accent-l", "--accent-d", "--accent-ink-l", "--accent-ink-d"] as const;
+/**
+ * What a Custom accent sets on <html>, for both families: its fill (as picked), the text on it,
+ * and the accent as text where the fill itself wouldn't read (--accent-text-*).
+ */
+export const ACCENT_TOKENS = ["--accent-l", "--accent-d", "--accent-ink-l", "--accent-ink-d", "--accent-text-l", "--accent-text-d"] as const;
 
 /** Every custom property LookSync may set, so it can clear the ones a new look doesn't use. */
 export const LOOK_TOKENS: readonly string[] = [...THEME_TOKENS, ...ACCENT_TOKENS];
@@ -352,20 +355,23 @@ export function resolveLook(s: LookSettings): Look {
   }
   behind[family] = parseColor(bg)!;
 
-  const setAccent = (f: Family, fill: Rgba) => {
-    vars[`--accent-${slot(f)}`] = formatColor(fill);
-    vars[`--accent-ink-${slot(f)}`] = inkOn(fill, behind[f]);
+  // Where the accent is text (links, today's date, numbers) it must read at 4.5:1; where it is a
+  // fill (buttons, switches, the picked tab) it stays the color as picked, with black or white
+  // text on it. So only the text color moves, and only when the fill wouldn't read as text.
+  const setText = (f: Family, fill: Rgba) => {
+    const text = readableAccent({ ...over(fill, behind[f]), a: 1 }, f, grounds[f]);
+    if (formatColor(text) !== formatColor({ ...fill, a: 1 }) || fill.a < 1) vars[`--accent-text-${slot(f)}`] = formatColor(text);
   };
   const custom = s.accent === "custom" && s.customAccentColor ? parseColor(s.customAccentColor) : null;
   if (custom) {
-    // A fill per family, like the presets: the color as picked wherever it reads as text,
-    // with black or white text on it, whichever reads better over that family's background.
-    for (const f of FAMILIES) setAccent(f, readableAccent(custom, f, grounds[f]));
+    for (const f of FAMILIES) {
+      vars[`--accent-${slot(f)}`] = formatColor(custom);
+      vars[`--accent-ink-${slot(f)}`] = inkOn(custom, behind[f]);
+      setText(f, custom);
+    }
   } else if (customTheme && s.accent !== "ink" && s.accent !== "custom") {
-    // A preset accent is made for the preset themes; on a Custom one it moves only if it must.
-    const preset = parseColor(ACCENT_FILLS[s.accent][family])!;
-    const fill = readableAccent(preset, family, grounds[family]);
-    if (formatColor(fill) !== formatColor(preset)) setAccent(family, fill);
+    // A preset accent is made for the preset themes; on a Custom one its text color moves if it must.
+    setText(family, parseColor(ACCENT_FILLS[s.accent][family])!);
   }
   return { theme: s.theme, accent: s.accent, family, bg, vars };
 }
