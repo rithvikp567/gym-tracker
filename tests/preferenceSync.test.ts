@@ -16,15 +16,20 @@ const supabase = vi.hoisted(() => {
     gate: null as Promise<void> | null,
     /** While true, reading the account fails. */
     failReads: false,
+    /** While true, pulls fail with a server error. */
+    failPulls: false,
+    /** Runs after the account's settings are saved, so a test can act between two syncs. */
+    afterUpdate: null as (() => void) | null,
   };
   let onAuth: (event: string, session: unknown) => void = () => {};
+  const session = () => ({ user: { id: "me", email: "me@example.com" } });
   const query = {
     select: () => query,
     gt: () => query,
     order: () => query,
     range: async () => {
       await account.gate;
-      return { data: [], error: null };
+      return account.failPulls ? { data: null, error: { message: "Internal server error" } } : { data: [], error: null };
     },
     upsert: async () => ({ error: null }),
   };
@@ -38,6 +43,9 @@ const supabase = vi.hoisted(() => {
       },
       updateUser: async ({ data }: { data: Record<string, unknown> }) => {
         Object.assign(account.metadata, structuredClone(data));
+        // Like auth-js: saving the user tells every listener before updateUser returns.
+        onAuth("USER_UPDATED", session());
+        account.afterUpdate?.();
         return { data: {}, error: null };
       },
     },
@@ -46,7 +54,13 @@ const supabase = vi.hoisted(() => {
       return query;
     },
   };
-  return { account, client, signIn: () => onAuth("SIGNED_IN", { user: { id: "me", email: "me@example.com" } }) };
+  return {
+    account,
+    client,
+    signIn: () => onAuth("SIGNED_IN", session()),
+    /** An auth event from auth-js; by default for the account already signed in. */
+    emit: (event: string, about: unknown = session()) => onAuth(event, about),
+  };
 });
 
 vi.mock("@supabase/supabase-js", () => ({ createClient: () => supabase.client }));
@@ -183,7 +197,7 @@ describe("SupabaseSync preferences", () => {
     vi.stubGlobal("window", new EventTarget());
     vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
     vi.stubGlobal("navigator", { onLine: true });
-    Object.assign(supabase.account, { metadata: {}, reads: 0, queries: 0, gate: null, failReads: false });
+    Object.assign(supabase.account, { metadata: {}, reads: 0, queries: 0, gate: null, failReads: false, failPulls: false, afterUpdate: null });
     settings = new SettingsService(memoryStore(), systemClock);
     sync = new SupabaseSync("https://example.supabase.co", "key", new MemoryRecordStore(), () => {});
     sync.attachPreferences(settings);
@@ -268,6 +282,89 @@ describe("SupabaseSync preferences", () => {
     await settle();
     expect(supabase.account.reads).toBe(3);
     expect(settings.get().theme).toBe("graphite");
+  });
+
+  it("keeps checking on focus after the clock is turned back", async () => {
+    vi.setSystemTime(start + 20_000);
+    window.dispatchEvent(new Event("focus")); // the sign-in check and this one ran while the clock was 5 h fast
+    await settle();
+    expect(supabase.account.reads).toBe(2);
+    const corrected = start - 5 * 3_600_000;
+    phoneSaves("graphite", true, { theme: corrected + 1_000, showLastSession: 0 });
+    vi.setSystemTime(corrected + 2_000);
+    window.dispatchEvent(new Event("focus"));
+    await settle();
+    expect(supabase.account.reads).toBe(3);
+    expect(settings.get().theme).toBe("graphite");
+    vi.setSystemTime(corrected + 10_000);
+    window.dispatchEvent(new Event("focus"));
+    await settle();
+    expect(supabase.account.reads).toBe(3); // throttled again, by the corrected clock
+  });
+
+  it("re-reads on the next automatic sync after the clock is turned back", async () => {
+    const corrected = start - 5 * 3_600_000; // the sign-in check ran while the clock was 5 h fast
+    phoneSaves("graphite", true, { theme: corrected + 1_000, showLastSession: 0 });
+    vi.setSystemTime(corrected + 2_000);
+    sync.requestSync(0);
+    await settle();
+    expect(supabase.account.reads).toBe(2);
+    expect(settings.get().theme).toBe("graphite");
+    vi.setSystemTime(corrected + 30_000);
+    sync.requestSync(0);
+    await settle();
+    expect(supabase.account.reads).toBe(2); // once a minute again, by the corrected clock
+  });
+
+  it("doesn't hide a failed sync when a focus check uploads a setting", async () => {
+    supabase.account.failPulls = true;
+    settings.update({ theme: "graphite" });
+    await settle();
+    const failed = sync.status();
+    expect(failed).toMatchObject({ state: "error", message: "Sync failed: Internal server error" });
+    expect(accountPrefs()).toBeUndefined(); // the sync failed before it got to the settings
+    vi.setSystemTime(start + 20_000);
+    window.dispatchEvent(new Event("focus"));
+    await settle();
+    expect(accountPrefs()?.values.theme).toBe("graphite");
+    expect(sync.status()).toBe(failed); // still "Sync failed": no records synced
+  });
+
+  it("shows a sync queued by the Sync button as syncing until it ends, after one that uploaded a setting", async () => {
+    let release = () => {};
+    supabase.account.gate = new Promise((resolve) => (release = resolve));
+    settings.update({ theme: "graphite" });
+    await settle(); // that sync is now waiting on the server
+    const pressed = sync.syncNow();
+    let releaseQueued = () => {};
+    // Once the first sync has uploaded the color, the queued one waits on the server.
+    supabase.account.afterUpdate = () => (supabase.account.gate = new Promise((resolve) => (releaseQueued = resolve)));
+    release();
+    await settle();
+    expect(accountPrefs()?.values.theme).toBe("graphite");
+    expect(sync.status().state).toBe("syncing");
+    supabase.account.gate = null;
+    releaseQueued();
+    await pressed;
+    expect(sync.status()).toMatchObject({ state: "idle", message: null });
+  });
+
+  it("resets the sync status only when the account changes, not on a token refresh or a tab back in front", async () => {
+    supabase.account.failPulls = true;
+    sync.requestSync(0);
+    await settle();
+    const failed = sync.status();
+    expect(failed.state).toBe("error");
+    supabase.emit("TOKEN_REFRESHED");
+    supabase.emit("SIGNED_IN"); // auth-js says this again whenever the tab comes back to the front
+    await settle();
+    expect(sync.status()).toBe(failed);
+    supabase.emit("USER_UPDATED", { user: { id: "me", email: "new@example.com" } });
+    await settle();
+    expect(sync.status()).toEqual({ ...failed, email: "new@example.com" });
+    supabase.emit("SIGNED_OUT", null);
+    await settle();
+    expect(sync.status()).toMatchObject({ state: "signed-out", email: null, message: null });
   });
 
   it("keeps a change made after adopting a copy stamped by a clock that runs ahead", async () => {

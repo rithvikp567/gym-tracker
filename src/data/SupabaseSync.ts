@@ -230,10 +230,9 @@ export class SupabaseSync implements SyncController {
    * alone, since no records were synced.
    */
   private checkPreferencesOnFocus(): void {
-    const now = Date.now();
     if (!this.userId || !navigator.onLine) return;
-    if (now - this.prefsCheckedAt < PREFS_FOCUS_MS || now - this.prefsFocusAt < PREFS_FOCUS_MS) return;
-    this.prefsFocusAt = now;
+    if (isRecent(this.prefsCheckedAt, PREFS_FOCUS_MS) || isRecent(this.prefsFocusAt, PREFS_FOCUS_MS)) return;
+    this.prefsFocusAt = Date.now();
     this.prefsCheckDue = true;
     this.syncPreferences().catch((e: unknown) => console.warn("Preferences didn't sync", e));
   }
@@ -252,7 +251,7 @@ export class SupabaseSync implements SyncController {
     const version = this.prefsVersion;
     const changedHere = version !== this.prefsSyncedVersion;
     const due = this.prefsCheckDue;
-    if (!changedHere && !due && Date.now() - this.prefsCheckedAt < PREFS_REFRESH_MS) return;
+    if (!changedHere && !due && isRecent(this.prefsCheckedAt, PREFS_REFRESH_MS)) return;
     // Cleared before reading, so a request that arrives during the read gets a read of its own.
     this.prefsCheckDue = false;
     try {
@@ -286,17 +285,29 @@ export class SupabaseSync implements SyncController {
 
   private onAuth(session: AuthSession | null): void {
     const user = session?.user ?? null;
-    const isNewUser = (user?.id ?? null) !== this.userId;
+    const email = user?.email ?? null;
+    if ((user?.id ?? null) === this.userId) {
+      // Same account: a token refresh, the tab back in front, or a settings upload (USER_UPDATED).
+      // The status still describes the last sync, so only a new email is news.
+      if (email !== this.current.email) this.set({ email });
+      return;
+    }
     this.userId = user?.id ?? null;
-    if (user && isNewUser) this.prefsCheckDue = true;
-    this.set({ state: user ? "idle" : "signed-out", email: user?.email ?? null, message: null });
-    if (user && isNewUser) this.requestSync(0);
+    if (user) this.prefsCheckDue = true;
+    this.set({ state: user ? "idle" : "signed-out", email, message: null });
+    if (user) this.requestSync(0);
   }
 
   private set(changes: Partial<SyncStatus>): void {
     this.current = { ...this.current, ...changes };
     this.emitter.emit(this.current);
   }
+}
+
+/** Whether `at` (ms) was less than `ms` ago. A time still ahead (the clock was turned back since) has passed. */
+function isRecent(at: number, ms: number): boolean {
+  const elapsed = Date.now() - at;
+  return elapsed >= 0 && elapsed < ms;
 }
 
 /** Supabase's auth messages, reworded for the few cases a person will actually hit. */
