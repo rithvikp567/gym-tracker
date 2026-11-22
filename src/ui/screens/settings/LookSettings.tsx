@@ -17,8 +17,10 @@ type Picking = "theme" | "accent" | null;
  *
  * Swatches and previews carry their own data-accent / data-theme / data-family, so tokens.css
  * colors each one as itself: no colors here, except a Custom color the user picked.
+ *
+ * `bare` leaves out the card, for when it sits inside another one (Settings' drop-down).
  */
-export function LookSettings() {
+export function LookSettings({ bare = false }: { bare?: boolean } = {}) {
   const { settings } = useServices();
   const current = useSettings();
   const [picking, setPicking] = useState<Picking>(null);
@@ -60,7 +62,7 @@ export function LookSettings() {
   };
 
   return (
-    <div className="card look">
+    <div className={bare ? "look" : "card look"}>
       <div className="look-group">
         <div className="look-head">
           <h3 className="look-title" id="look-accent">
