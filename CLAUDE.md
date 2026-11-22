@@ -5,6 +5,8 @@
 - Domain objects are immutable: methods return new instances.
 - New spreadsheet layouts = a new `SheetImporter` class registered in `importers/readWorkbook.ts`.
 - Colors come from tokens in `src/ui/theme/tokens.css`; never hard-code colors in components. Chart series use `--series-1…8` in fixed order, assigned by the exercise's slot on its day.
+  The accent as text or an icon is `--accent-text` (a custom accent's fill is the exact pick and may not read as text); fills use `--accent`. Code that reads token colors in JS re-reads on look changes (`useLookVersion`).
+- **Everything the user sets or saves follows them across devices** (the user's general rule): a new preference goes through `SettingsService` (listed in `Settings`, `DEFAULTS`, `sanitize`; synced per setting with the account), new data through the synced record tables. Never a device-only setting unless it's a view choice like a picked tab.
 - Before finishing: `npm test`, `npm run typecheck`, `npm run build`. For UI checks use `http://localhost:5173/?demo` (in-memory sample data).
 - After `npm install`, run `node scripts/public-lockfile.mjs` (this machine installs through a private mirror; the lockfile must point at registry.npmjs.org).
 - Pushes go from the personal GitHub account `rithvikp567` with its GitHub noreply email set repo-locally, never a work account or work email. Branch per feature, PR into `main`.
