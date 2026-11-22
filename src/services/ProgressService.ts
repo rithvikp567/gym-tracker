@@ -1,5 +1,7 @@
 import type { Exercise } from "../domain/Exercise";
+import { formatLoad, platesToPounds } from "../domain/Load";
 import { LocalDate } from "../domain/LocalDate";
+import { formatNumber } from "../domain/SetEntry";
 import type { Session } from "../domain/Session";
 import type { WorkoutDay } from "../domain/WorkoutDay";
 import type { Clock, Repositories } from "./ports";
@@ -16,9 +18,11 @@ export const RANGES: readonly { key: RangeKey; label: string }[] = [
 
 export interface ProgressPoint {
   date: LocalDate;
-  /** Heaviest set that session. */
+  /** Heaviest set that session, in pounds (plates are converted so every line shares one axis). */
   weight: number;
-  /** "135 · 8/8/7" for the tooltip. */
+  /** The heaviest set as logged: "135", or "2.5 pl" for plates. */
+  label: string;
+  /** "135 · 8/8/7" for the tooltip; plates add the pounds: "2.5 pl (230 lb) · 8/8". */
   summary: string;
 }
 
@@ -68,8 +72,16 @@ export class ProgressService {
       const points: ProgressPoint[] = [];
       for (const s of inRange) {
         const log = s.log(exercise.id);
-        const weight = log?.topWeight() ?? null;
-        if (log && weight !== null) points.push({ date: s.date, weight, summary: log.summary() });
+        const top = log?.topWeight() ?? null;
+        if (!log || top === null) continue;
+        if (exercise.unit === "plates") {
+          const pounds = platesToPounds(top);
+          const reps = log.repsLabel();
+          const summary = `${log.weightLabel("plates")} (${formatNumber(pounds)} lb)${reps ? ` · ${reps}` : ""}`;
+          points.push({ date: s.date, weight: pounds, label: formatLoad(top, "plates"), summary });
+        } else {
+          points.push({ date: s.date, weight: top, label: formatLoad(top, "lb"), summary: log.summary() });
+        }
       }
       if (points.length) lines.push({ exercise, points });
     }

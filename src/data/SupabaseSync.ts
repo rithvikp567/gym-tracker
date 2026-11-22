@@ -1,7 +1,8 @@
 import { createClient, type Session as AuthSession, type SupabaseClient } from "@supabase/supabase-js";
 import { EPOCH, type Syncable } from "../domain/ids";
 import { Emitter, type Unsubscribe } from "../lib/Emitter";
-import type { SyncController, SyncStatus } from "../services/ports";
+import type { SyncController, SyncedPreferences, SyncStatus } from "../services/ports";
+import { readPreferences, reconcilePreferences } from "./preferenceSync";
 import { TABLES, type RecordStore, type TableName } from "./RecordStore";
 
 interface RemoteRow {
@@ -16,6 +17,10 @@ const PAGE = 500;
 const PUSH_CHUNK = 200;
 /** Re-read a few seconds before the last cursor in case rows committed out of order. */
 const OVERLAP_MS = 5_000;
+/** Preferences live in the account's user metadata under this key, so they need no table. */
+const PREFS_KEY = "gym_tracker_prefs";
+/** Edits sync every few seconds; in between, the account's preferences are re-read at most this often. */
+const PREFS_REFRESH_MS = 60_000;
 
 /**
  * Supabase account (email + password) + two-way sync of the local store.
@@ -24,6 +29,8 @@ const OVERLAP_MS = 5_000;
  *        newer `updated_at`, see supabase/migrations).
  *  pull: download rows changed since the last pull (by server time) and apply the ones newer
  *        than what's on this device.
+ *  prefs: keep the preferences (color style…) in step with the account's user metadata,
+ *        newest change wins (TASKS.md D20).
  */
 export class SupabaseSync implements SyncController {
   readonly configured = true;
@@ -34,6 +41,13 @@ export class SupabaseSync implements SyncController {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running: Promise<void> | null = null;
   private again = false;
+  private prefs: SyncedPreferences | null = null;
+  /** Bumped on every local preference change; compared with the last version synced. */
+  private prefsVersion = 0;
+  private prefsSyncedVersion = 0;
+  /** Re-read the account's preferences on the next sync (app opened, back in front, signed in). */
+  private prefsCheckDue = true;
+  private prefsCheckedAt = 0;
 
   constructor(
     url: string,
@@ -46,9 +60,14 @@ export class SupabaseSync implements SyncController {
     });
     // Don't call Supabase inside this callback (it can deadlock); defer instead.
     this.client.auth.onAuthStateChange((_event, session) => setTimeout(() => this.onAuth(session), 0));
-    window.addEventListener("online", () => this.requestSync(0));
+    window.addEventListener("online", () => {
+      this.prefsCheckDue = true;
+      this.requestSync(0);
+    });
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") this.requestSync(0);
+      if (document.visibilityState !== "visible") return;
+      this.prefsCheckDue = true;
+      this.requestSync(0);
     });
   }
 
@@ -58,6 +77,14 @@ export class SupabaseSync implements SyncController {
 
   subscribe(listener: (status: SyncStatus) => void): Unsubscribe {
     return this.emitter.subscribe(listener);
+  }
+
+  attachPreferences(preferences: SyncedPreferences): void {
+    this.prefs = preferences;
+    preferences.onLocalChange(() => {
+      this.prefsVersion++;
+      this.requestSync(0);
+    });
   }
 
   async signIn(email: string, password: string): Promise<void> {
@@ -110,6 +137,8 @@ export class SupabaseSync implements SyncController {
     try {
       await this.push();
       await this.pull();
+      // Preferences are a nicety: a failure here never marks the whole sync as failed.
+      await this.syncPreferences().catch((e: unknown) => console.warn("Preferences didn't sync", e));
       this.set({ state: "idle", lastSyncedAt: new Date(), message: null });
     } catch (e) {
       const offline = !navigator.onLine || e instanceof TypeError;
@@ -172,6 +201,30 @@ export class SupabaseSync implements SyncController {
     if (changed) this.onRemoteChange();
   }
 
+  /** Compares this device's preferences with the account's copy and keeps the newer one. */
+  private async syncPreferences(): Promise<void> {
+    const prefs = this.prefs;
+    if (!prefs) return;
+    const version = this.prefsVersion;
+    const changedHere = version !== this.prefsSyncedVersion;
+    if (!changedHere && !this.prefsCheckDue && Date.now() - this.prefsCheckedAt < PREFS_REFRESH_MS) return;
+
+    const { data, error } = await this.client.auth.getUser();
+    if (error) throw error;
+    const remote = readPreferences(data.user?.user_metadata?.[PREFS_KEY]);
+    const local = prefs.snapshot();
+    const action = reconcilePreferences(local, remote);
+    if (action === "adopt" && remote) {
+      prefs.applyRemote(remote);
+    } else if (action === "push") {
+      const { error: updateError } = await this.client.auth.updateUser({ data: { [PREFS_KEY]: local } });
+      if (updateError) throw updateError;
+    }
+    this.prefsSyncedVersion = version;
+    this.prefsCheckDue = false;
+    this.prefsCheckedAt = Date.now();
+  }
+
   /** Keeps whichever copy was edited last. Returns true if anything local changed. */
   private async apply(table: TableName, rows: RemoteRow[]): Promise<boolean> {
     const newer: Syncable[] = [];
@@ -188,6 +241,7 @@ export class SupabaseSync implements SyncController {
     const user = session?.user ?? null;
     const isNewUser = (user?.id ?? null) !== this.userId;
     this.userId = user?.id ?? null;
+    if (user && isNewUser) this.prefsCheckDue = true;
     this.set({ state: user ? "idle" : "signed-out", email: user?.email ?? null, message: null });
     if (user && isNewUser) this.requestSync(0);
   }

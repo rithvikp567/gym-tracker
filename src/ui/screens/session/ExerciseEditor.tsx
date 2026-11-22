@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Exercise } from "../../../domain/Exercise";
 import { ExerciseLog } from "../../../domain/ExerciseLog";
+import { HALF_PLATE_LB, PLATE_LB, platesToPounds } from "../../../domain/Load";
 import { SetEntry, formatNumber } from "../../../domain/SetEntry";
 import type { PastLog } from "../../../services/SessionService";
 import { Icon } from "../../components/Icon";
@@ -51,6 +52,8 @@ export function ExerciseEditor({
   const [draft, setDraft] = useState(() => toDraft(exercise, log, last));
   const save = useDebounced(onSave, 400);
   const lastSets = last?.log.filledSets() ?? [];
+  const plates = exercise.unit === "plates";
+  const unitPlaceholder = plates ? "plates" : "lb";
 
   const update = (next: Draft) => {
     setDraft(next);
@@ -117,7 +120,7 @@ export function ExerciseEditor({
             inputMode="decimal"
             enterKeyHint="next"
             aria-label={`Set ${i + 1} weight`}
-            placeholder={lastSets[i]?.weight !== undefined && lastSets[i]?.weight !== null ? text(lastSets[i]!.weight) : "lb"}
+            placeholder={lastSets[i]?.weight !== undefined && lastSets[i]?.weight !== null ? text(lastSets[i]!.weight) : unitPlaceholder}
             value={s.weight}
             onChange={(e) => setWeight(i, e.target.value)}
           />
@@ -136,6 +139,7 @@ export function ExerciseEditor({
           </button>
         </div>
       ))}
+      {plates && <PlatesHint value={parse(draft.sets.find((x) => x.weight.trim())?.weight ?? "")} />}
       <div className="editor-actions">
         <button type="button" className="btn" onClick={addSet}>
           <Icon name="plus" size={16} /> Set
@@ -148,5 +152,22 @@ export function ExerciseEditor({
       </div>
       {noteField}
     </>
+  );
+}
+
+/** Under a plates exercise: what the number means, and the pounds it comes to. */
+function PlatesHint({ value }: { value: number | null }) {
+  return (
+    <p className="plates-hint">
+      Plates per side · .5 = a {HALF_PLATE_LB} lb plate, 1 = {PLATE_LB} lb
+      {value !== null && value > 0 && (
+        <>
+          {" · "}
+          <span className="num">
+            {formatNumber(value)} pl = {formatNumber(platesToPounds(value))} lb
+          </span>
+        </>
+      )}
+    </p>
   );
 }

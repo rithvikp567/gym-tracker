@@ -1,138 +1,147 @@
+import { useRef } from "react";
 import { LocalDate, MONTH_SHORT, WEEKDAY_LETTER } from "../../domain/LocalDate";
-import type { WorkoutDay } from "../../domain/WorkoutDay";
+import type { CalendarDay } from "../../services/CalendarService";
+import { CenterBlock } from "../components/CenterBlock";
 import { Icon } from "../components/Icon";
-import { ScreenHead } from "../components/controls";
+import { WorkoutRows } from "../components/WorkoutRows";
 import { useViewState } from "../hooks/useViewState";
+import { useSwipe } from "../hooks/useSwipe";
+import { HOME_PICK_KEY, homePick, type HomePick } from "../homePick";
 import { href } from "../router";
 import { useLive, useServices, useSyncStatus } from "../ServicesContext";
 
 /** "Upper 1" → "U1", "Abs/Cardio" → "AC", "Lower" → "Lower". */
-export function shortName(name: string): string {
+function shortName(name: string): string {
   if (name.length <= 5) return name;
   const words = name.split(/[\s/]+/).filter(Boolean);
   if (words.length < 2) return name.slice(0, 4);
   return words.map((w) => (/^\d+$/.test(w) ? w : w[0]!.toUpperCase())).join("");
 }
 
+function weekTitle(offset: number): string {
+  if (offset === 0) return "This week";
+  if (offset === -1) return "Last week";
+  if (offset === 1) return "Next week";
+  return offset < 0 ? `${-offset} weeks ago` : `In ${offset} weeks`;
+}
+
 export function HomeScreen() {
   const { setup, calendar, sessions } = useServices();
   const today = calendar.today();
-  // The picked day survives a trip to another tab; a day outside this week falls back to today.
-  const [selected, setSelected] = useViewState<string | null>("home.day", () => null);
+  const [pick, setPick] = useViewState<HomePick | null>(HOME_PICK_KEY, () => null);
+  const picked = (pick && pick.on === today.toString() ? LocalDate.tryParse(pick.date) : null) ?? today;
+  const weekStart = picked.startOfWeek();
+  const offset = today.startOfWeek().daysUntil(weekStart) / 7;
+  const choose = (date: LocalDate) => setPick(homePick(date, today));
 
-  const data = useLive(async () => {
-    const [days, week] = await Promise.all([setup.days(), calendar.week(today)]);
-    const lastDone = new Map<string, LocalDate>();
-    for (const d of days) {
-      const past = (await sessions.history(d.id)).filter((s) => s.isWorkout() && !s.date.isAfter(today));
-      const last = past.at(-1);
-      if (last) lastDone.set(d.id, last.date);
-    }
-    return { days, week, lastDone };
-  }, [today.toString()]);
+  const days = useLive(() => setup.days(), [], "days");
+  const data = useLive(
+    async () => {
+      const [week, lastDone] = await Promise.all([calendar.week(weekStart), sessions.lastWorkoutDates(today)]);
+      return { week, lastDone };
+    },
+    [weekStart.toString(), today.toString()],
+    "home",
+  );
 
-  if (!data) return <div className="loading">Loading…</div>;
-  if (!data.days.length) return <FirstRun />;
+  if (days && !days.length) return <FirstRun />;
+  if (!days || !data) return <div className="loading">Loading…</div>;
 
-  const weekStart = data.week[0]!.date;
-  const weekEnd = data.week[6]!.date;
-  const selectedDay = data.week.find((d) => d.date.toString() === selected) ?? data.week.find((d) => d.date.equals(today))!;
-  const dayName = (id: string | null) => data.days.find((d) => d.id === id)?.name ?? "";
+  const weekEnd = weekStart.addDays(6);
+  const pickedDay = data.week.find((d) => d.date.equals(picked)) ?? data.week[0]!;
+  const dayName = (id: string | null) => days.find((d) => d.id === id)?.name ?? "";
+  const otherYear = weekStart.year !== today.year ? `, ${weekStart.year}` : "";
 
   return (
-    <div className="home">
-      <ScreenHead
-        title="This week"
-        sub={
-          <span className="num">
+    <div className="home page-fill">
+      <header className="screen-head home-head">
+        <div>
+          <h1>{weekTitle(offset)}</h1>
+          <div className="sub num">
             {MONTH_SHORT[weekStart.month - 1]} {weekStart.day} – {weekEnd.month !== weekStart.month ? `${MONTH_SHORT[weekEnd.month - 1]} ` : ""}
-            {weekEnd.day} · Week {today.isoWeek()}
-          </span>
-        }
-        actions={<SyncChip />}
+            {weekEnd.day}
+            {otherYear} | Week {weekStart.isoWeek()}
+          </div>
+        </div>
+        <div className="home-head-side">
+          <SyncChip />
+          <div className="week-nav" role="group" aria-label="Week">
+            {offset !== 0 && (
+              <button type="button" className="link" onClick={() => choose(today)}>
+                Today
+              </button>
+            )}
+            <button type="button" className="icon-btn" aria-label="Previous week" onClick={() => choose(picked.addDays(-7))}>
+              <Icon name="left" size={20} />
+            </button>
+            <button type="button" className="icon-btn" aria-label="Next week" onClick={() => choose(picked.addDays(7))}>
+              <Icon name="right" size={20} />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <WeekStrip
+        week={data.week}
+        today={today}
+        picked={pickedDay.date}
+        dayName={dayName}
+        onPick={choose}
+        onPrevWeek={() => choose(picked.addDays(-7))}
+        onNextWeek={() => choose(picked.addDays(7))}
       />
 
-      <div className="week-strip" role="group" aria-label="Pick a day">
-        {data.week.map((d) => (
-          <button
-            key={d.date.toString()}
-            type="button"
-            className={`week-day${d.date.equals(today) ? " today" : ""}`}
-            aria-pressed={d.date.toString() === selectedDay.date.toString()}
-            aria-label={`${d.date.label()}${d.status === "done" ? ", worked out" : d.status === "missed" ? ", missed" : ""}`}
-            onClick={() => setSelected(d.date.toString())}
-          >
-            <span className="wd">{WEEKDAY_LETTER[d.date.weekday()]}</span>
-            <span className="dn num">{d.date.day}</span>
-            <span className="plan">{d.plannedDayId ? shortName(dayName(d.plannedDayId)) : ""}</span>
-            <span className="dot-slot">
-              {(d.status === "done" || d.status === "missed") && <span className={`dot ${d.status}`} />}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      <div className="section-title centered">
-        <span>{selectedDay.date.equals(today) ? "Today" : selectedDay.date.label()}</span>
-        <a className="link" href={href({ name: "setup" })}>
-          Edit days
-        </a>
-      </div>
-
-      <div className="list">
-        {data.days.map((day) => (
-          <DayRow
-            key={day.id}
-            day={day}
-            date={selectedDay.date}
-            planned={selectedDay.plannedDayId === day.id}
-            logged={selectedDay.sessions.find((s) => s.workoutDayId === day.id)?.isWorkout() ?? false}
-            lastDone={data.lastDone.get(day.id)}
-          />
-        ))}
-      </div>
+      <CenterBlock>
+        <div className="section-title centered">
+          <span>{pickedDay.date.equals(today) ? "Today" : pickedDay.date.label()}</span>
+          <a className="link" href={href({ name: "setup" })}>
+            Edit days
+          </a>
+        </div>
+        <WorkoutRows days={days} date={pickedDay.date} plannedDayId={pickedDay.plannedDayId} sessions={pickedDay.sessions} lastDone={data.lastDone} />
+      </CenterBlock>
     </div>
   );
 }
 
-function DayRow({
-  day,
-  date,
-  planned,
-  logged,
-  lastDone,
+/** Mon–Sun with the planned workout and a green/red dot. Swipe sideways for another week. */
+function WeekStrip({
+  week,
+  today,
+  picked,
+  dayName,
+  onPick,
+  onPrevWeek,
+  onNextWeek,
 }: {
-  day: WorkoutDay;
-  date: LocalDate;
-  planned: boolean;
-  logged: boolean;
-  lastDone: LocalDate | undefined;
+  week: CalendarDay[];
+  today: LocalDate;
+  picked: LocalDate;
+  dayName: (id: string | null) => string;
+  onPick: (date: LocalDate) => void;
+  onPrevWeek: () => void;
+  onNextWeek: () => void;
 }) {
-  const count = day.activeExercises().length;
+  const strip = useRef<HTMLDivElement>(null);
+  useSwipe(strip, { onSwipeRight: onPrevWeek, onSwipeLeft: onNextWeek });
   return (
-    <a className="list-row day-row" href={href({ name: "session", dayId: day.id, date: date.toString() })}>
-      {/* Empty left column the same width as the icons on the right keeps the text truly centered. */}
-      <span className="side" aria-hidden />
-      <div className="grow">
-        <div className="title">
-          {day.name} {planned && <span className="tag-planned">· Planned</span>}
-        </div>
-        <div className="meta num">
-          {count} exercise{count === 1 ? "" : "s"}
-          {lastDone ? ` · last ${lastDone.shortLabel()}` : " · not logged yet"}
-        </div>
-      </div>
-      <span className="side end">
-        {logged && (
-          <span className="check-mark" aria-label="Logged">
-            <Icon name="check" size={20} />
-          </span>
-        )}
-        <span className="chev">
-          <Icon name="right" size={18} />
-        </span>
-      </span>
-    </a>
+    <div className="week-strip" role="group" aria-label="Pick a day" ref={strip}>
+      {week.map((d) => (
+        <button
+          key={d.date.toString()}
+          type="button"
+          className={`week-day${d.date.equals(today) ? " today" : ""}`}
+          aria-pressed={d.date.equals(picked)}
+          aria-label={`${d.date.label()}${d.status === "done" ? ", worked out" : d.status === "missed" ? ", missed" : ""}`}
+          onClick={() => onPick(d.date)}
+        >
+          <span className="wd">{WEEKDAY_LETTER[d.date.weekday()]}</span>
+          <span className="dn num">{d.date.day}</span>
+          <span className="plan">{d.plannedDayId ? shortName(dayName(d.plannedDayId)) : ""}</span>
+          <span className="dot-slot">{(d.status === "done" || d.status === "missed") && <span className={`dot ${d.status}`} />}</span>
+        </button>
+      ))}
+    </div>
   );
 }
 

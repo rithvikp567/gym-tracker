@@ -55,6 +55,24 @@ export class Session {
     return new Session({ ...this.data, deleted: false }, logs);
   }
 
+  /** Drops one exercise's log (deleting that exercise's history). */
+  withoutLog(exerciseId: string): Session {
+    return new Session(this.data, this.logList.filter((l) => l.exerciseId !== exerciseId));
+  }
+
+  /**
+   * Files `fromId`'s log under `intoId` (merging two exercises). If both were logged that day,
+   * the two logs become one.
+   */
+  mergeLogs(fromId: string, intoId: string): Session {
+    const from = this.log(fromId);
+    if (!from || fromId === intoId) return this;
+    const into = this.log(intoId);
+    const merged = into ? into.mergedWith(from) : from.withExerciseId(intoId);
+    const others = this.logList.filter((l) => l.exerciseId !== fromId && l.exerciseId !== intoId);
+    return new Session(this.data, [...others, merged]);
+  }
+
   /** You trained: at least one exercise has numbers or is marked done. */
   isWorkout(): boolean {
     return !this.deleted && this.logList.some((l) => l.hasResult());

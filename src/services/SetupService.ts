@@ -51,4 +51,41 @@ export class SetupService {
     const split = await this.split();
     await this.repos.split.save(split.withWeekday(weekday, workoutDayId));
   }
+
+  /** How many sessions of the day have something logged for each exercise. */
+  async usage(dayId: string): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    for (const session of await this.repos.sessions.forWorkoutDay(dayId)) {
+      for (const log of session.logs) {
+        if (log.hasContent()) counts.set(log.exerciseId, (counts.get(log.exerciseId) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }
+
+  /**
+   * Folds `fromId` into `intoId` on a day (e.g. three spellings of leg press into one): every
+   * session's log moves over (combined when both were logged that day) and `fromId` goes away.
+   */
+  async mergeExercise(dayId: string, fromId: string, intoId: string): Promise<void> {
+    const day = await this.repos.days.get(dayId);
+    if (!day || fromId === intoId || !day.exercise(fromId) || !day.exercise(intoId)) return;
+    const affected = (await this.repos.sessions.forWorkoutDay(dayId)).filter((s) => s.log(fromId));
+    await this.repos.sessions.saveMany(affected.map((s) => s.mergeLogs(fromId, intoId)));
+    await this.repos.days.save(day.mergeExercise(fromId, intoId));
+  }
+
+  /** Deletes an exercise and everything logged for it. Sessions left with nothing are deleted too. */
+  async deleteExercise(dayId: string, exerciseId: string): Promise<void> {
+    const day = await this.repos.days.get(dayId);
+    if (!day?.exercise(exerciseId)) return;
+    const affected = (await this.repos.sessions.forWorkoutDay(dayId)).filter((s) => s.log(exerciseId));
+    await this.repos.sessions.saveMany(
+      affected.map((s) => {
+        const without = s.withoutLog(exerciseId);
+        return without.hasContent() ? without : without.markDeleted();
+      }),
+    );
+    await this.repos.days.save(day.removeExercise(exerciseId));
+  }
 }

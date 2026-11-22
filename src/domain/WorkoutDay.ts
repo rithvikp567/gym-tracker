@@ -43,8 +43,9 @@ export class WorkoutDay {
     return this.list.find((e) => e.id === id);
   }
 
+  /** By name key: an exact name match first, then old names and merged exercises (aliases). */
   exerciseByKey(key: string): Exercise | undefined {
-    return this.list.find((e) => e.key === key);
+    return this.list.find((e) => e.key === key) ?? this.list.find((e) => e.answersTo(key));
   }
 
   rename(name: string): WorkoutDay {
@@ -79,6 +80,31 @@ export class WorkoutDay {
   archiveExercise(id: string): WorkoutDay {
     const ex = this.exercise(id);
     return ex ? this.withExercise(ex.with({ archived: true })) : this;
+  }
+
+  /** Brings a removed exercise back; it joins the end of the active list. */
+  restoreExercise(id: string): WorkoutDay {
+    const ex = this.exercise(id);
+    if (!ex || !ex.archived) return this;
+    const active = this.activeExercises();
+    const archived = this.list.filter((e) => e.archived && e.id !== id);
+    return new WorkoutDay(this.data, [...active, ex.with({ archived: false }), ...archived]);
+  }
+
+  /** Takes an exercise off the day entirely (its logs must be moved or deleted separately). */
+  removeExercise(id: string): WorkoutDay {
+    return new WorkoutDay(this.data, this.list.filter((e) => e.id !== id));
+  }
+
+  /**
+   * Folds one exercise into another: `from` disappears and `into` answers to its names, so a
+   * re-import puts `from`'s rows on `into`. Move the session logs with `Session.mergeLogs`.
+   */
+  mergeExercise(fromId: string, intoId: string): WorkoutDay {
+    const from = this.exercise(fromId);
+    const into = this.exercise(intoId);
+    if (!from || !into || fromId === intoId) return this;
+    return this.withExercise(into.withAliases([from.key, ...from.aliases])).removeExercise(fromId);
   }
 
   /** Moves an active exercise up (-1) or down (+1) among the active ones. */

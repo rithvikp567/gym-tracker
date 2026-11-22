@@ -1,4 +1,6 @@
 import { useEffect, type ReactNode } from "react";
+import { goBack, href, type Route } from "../router";
+import { Icon } from "./Icon";
 
 export function Segmented<T extends string>({
   options,
@@ -52,5 +54,41 @@ export function ScreenHead({ title, sub, actions }: { title: ReactNode; sub?: Re
       </div>
       {actions}
     </header>
+  );
+}
+
+/**
+ * The ‹ at the top left: returns to the screen you came from (Calendar, Home, Progress…),
+ * or to `fallback` when this screen was opened directly.
+ */
+export function BackButton({ fallback, label = "Back" }: { fallback: Route; label?: string }) {
+  return (
+    <a
+      className="icon-btn"
+      href={href(fallback)}
+      aria-label={label}
+      onClick={(e) => {
+        e.preventDefault();
+        goBack(fallback);
+      }}
+    >
+      <Icon name="left" />
+    </a>
+  );
+}
+
+/** A text link that does the same (Done, Close). */
+export function BackLink({ fallback, children }: { fallback: Route; children: ReactNode }) {
+  return (
+    <a
+      className="link"
+      href={href(fallback)}
+      onClick={(e) => {
+        e.preventDefault();
+        goBack(fallback);
+      }}
+    >
+      {children}
+    </a>
   );
 }

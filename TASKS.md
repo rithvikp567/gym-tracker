@@ -2,9 +2,9 @@
 
 The single source of truth for this project: infra setup, features, design choices, lessons learned, and the backlog. **Update it in the same change as every feature** (relevant section + changelog), so anyone (or any agent) picking up the repo can start here.
 
-- **Status:** v0.2.0. Supabase connected and signed in; first push to GitHub Pages with this release (see [§3](#3-infra)).
+- **Status:** v0.3.0 (fixes and features from the first round of real-data testing). v0.2.0 is live on GitHub Pages with Supabase sync (see [§3](#3-infra)).
 - **Name / URL:** `gym-tracker` → `https://rithvikp567.github.io/gym-tracker/`
-- **Last updated:** 2026-11-21
+- **Last updated:** 2026-11-22
 
 ---
 
@@ -38,17 +38,17 @@ Status key: ⬜ not started · 🟨 in progress · ✅ done
 
 | # | Feature | Status | Notes |
 | --- | --- | --- | --- |
-| 1 | **Setup: workout days** | ✅ | Days are collapsible cards, collapsed by default (name, exercise count, planned weekdays). Open one to rename it, edit exercises one per line (name · sets × reps · ⋮ for move / type / remove), add exercises, move or delete the day. Add/rename/reorder/delete days. Add exercises free-form (one per line, as many as you want), each with type (weight × reps, or done / not done), target sets, target reps, or a target like "45 min walk". Removing an exercise archives it so history and chart lines survive. Weekly split editor. |
-| 2 | **Home: this week** | ✅ | Week strip (Mon–Sun) with planned day and green/red dot; tap a day to pick it (remembered while you visit other tabs). Below, centered rows for every workout day with "Planned", last done date, and a check if logged on the picked day. First run offers import / setup / sample data. |
-| 3 | **Session screen** | ✅ | Phone: exercise name with `2×8 | Last: 20 – 8/6/6` under it, weight and reps on the right. Desktop table: Exercise · Weight · Reps · Last time · Target, evenly spaced. Last session's numbers are a setting. Tap a row to edit sets (weight fills down to later sets; last time's numbers as placeholders; "Same as last time"). Each exercise has a note for that day, hidden behind a note icon until tapped. Change the date to back-fill. Delete a session. |
-| 4 | **Swipe through history** | ✅ | Swipe right → the previous time this workout day was done (Lower goes Fri → Tue); swipe left → forward, up to today. Arrow buttons do the same on desktop. Slide animation. |
-| 5 | **Calendar** | ✅ | Year view of 12 months, ‹ year › switcher (the year you were on is kept while the app is open), workout count. Green dot = workout, red = missed planned day (D3). Tap a day: one session opens it; otherwise a sheet lists sessions or lets you log one for that date. |
-| 6 | **Progress chart** | ✅ | Pick a workout day → one line per exercise (heaviest set per session). Chips toggle lines; the weight axis re-fits to visible lines only. Ranges: Week, Month, 6M, Year, All. A dot on every session. Picked day, range, and hidden lines are remembered on the device. Hover/tap tooltip with crosshair; "Show as a table". |
-| 7 | **Import from Google Sheets** | ✅ | `.xlsx` read in the browser, previewed (sessions per day, date range, exercises, notes), weekday chips per day, skip copied weeks, re-runnable. See [§6](#6-google-sheets-import). |
+| 1 | **Setup: workout days** | ✅ | Days are collapsible cards, collapsed by default (name, exercise count, planned weekdays). Open one to rename it, edit exercises one per line (name · sets × reps · ⋮ for move / type / pounds or plates / merge / remove), add exercises, move or delete the day. Add/rename/reorder/delete days. Add exercises free-form (one per line, as many as you want), each with type (weight × reps, or done / not done), target sets, target reps, or a target like "45 min walk". Removing an exercise archives it so history and chart lines survive. **Removed exercises** (collapsible list per day, with session counts): rename, merge into another exercise (e.g. three spellings of leg press into one; same-day logs combine), bring back, or delete with their history. Renamed and merged names are kept as aliases so re-importing the sheet lands on the right exercise (D25). Weekly split editor. `#/setup/<dayId>` opens one day (Progress → Edit). |
+| 2 | **Home: this week** | ✅ | Week strip (Mon–Sun) with planned day and green/red dot; tap a day to pick it (remembered while the app is open, back to today the next day). ‹ › and a swipe on the strip move between weeks ("Last week", "3 weeks ago", "Today" link). Header and strip stay at the top; the picked day's rows sit centered in the space below (D22): every workout day with "Planned", last done date, and a check if logged that day. First run offers import / setup / sample data. |
+| 3 | **Session screen** | ✅ | Header: workout name with **Last session / Next session**, and below it the date (`Mon, Oct 12 | Week 42`, tap to change it) with **‹ › day arrows** that step through calendar days (D23): the workout logged or planned that day, or a **Rest day** screen (`#/day/<date>`) listing your workouts. Phone: exercise name with `2×8 | Last: 20 – 8/6/6` under it, weight and reps on the right. Desktop table: Exercise · Weight · Reps · Last time · Target, every column centered, the open row's editor centered under it. The list is centered vertically under the header and holds still while a row is open (D22). Last session's numbers are a setting. Tap a row to edit sets (weight fills down to later sets; last time's numbers as placeholders; "Same as last time"). Plates exercises show `2.5 pl` and a pounds hint (D24). Each exercise has a note for that day, hidden behind a note icon until tapped. Delete a session. Back returns to wherever you came from (D21). |
+| 4 | **Swipe through history** | ✅ | Swipe right → the previous time this workout day was done (Lower goes Fri → Tue); swipe left → forward, up to today. The Last session / Next session buttons do the same. The content slides; the header stays still so buttons don't move under your finger. |
+| 5 | **Calendar** | ✅ | Year view of 12 months, ‹ year › switcher (the year you were on is kept while the app is open), workout count. Green dot = workout, red = missed planned day (D3). Tap a day: one session opens it (Back returns to the calendar at the same scroll position); otherwise a sheet lists sessions or lets you log one for that date. The grid draws straight from the dates, so opening it no longer flashes (D26). |
+| 6 | **Progress chart** | ✅ | Pick a workout day → one line per exercise (heaviest set per session). Chips toggle lines; the weight axis re-fits to visible lines only. Ranges: Week, Month, 6M, Year, All. A dot on every session. Plates exercises are charted in pounds (2.5 pl → 230 lb; tooltip shows both). **Edit** next to All / None opens that day in Workout Days to rename, merge, or delete exercises. Picked day, range, and hidden lines are remembered on the device. Hover/tap tooltip with crosshair; "Show as a table". |
+| 7 | **Import from Google Sheets** | ✅ | `.xlsx` read in the browser, previewed (sessions per day, date range, exercises, notes), weekday chips per day (on their own line on phones), start year field, "Skip copied weeks" switch, re-runnable. See [§6](#6-google-sheets-import). |
 | 8 | **Installable app (PWA)** | ✅ | Manifest + offline service worker, icons, iPhone safe areas. Settings shows "Install" on Android or the Add to Home Screen tip on iPhone; hidden on computers. Not yet installed on a real phone. |
 | 9 | **Desktop layout** | ✅ | Left rail nav; Home and Workout Days in a centered 720 px column; session as an A-style table; 3–4 calendar months per row; taller chart. Same colors as mobile. |
 | 10 | **Sign-in + sync** | ✅ | Email + password sign-in (D15), offline outbox, two-way sync, newest edit wins. Supabase project `gym-tracker` set up and the owner's account created (sign-ups off). Guide: [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md). |
-| 11 | **Settings** | ✅ | Color style (OLED / Graphite), "Show last session's numbers", workout days and split, import, JSON backup download, account and sync, install. More options TBD. |
+| 11 | **Settings** | ✅ | Color style (OLED / Graphite) and "Show last session's numbers", both saved to your account when signed in so phone and computer match (D20). Workout days and split, import, JSON backup download, account and sync, install. More options TBD. |
 
 ---
 
@@ -81,7 +81,7 @@ Checklist:
 - [x] Keys into `.env.local` and GitHub Actions variables
 - [x] Create your account in the app, then turn off new sign-ups
 
-Schema: tables `workout_days`, `sessions`, `splits`, each row = one app record as JSON (`data`) + `user_id`, `updated_at`, `deleted`, `server_updated_at`. A trigger keeps the newest copy when an offline device uploads an older one, and stamps server time for "what changed since". RLS: `auth.uid() = user_id`.
+Schema: tables `workout_days`, `sessions`, `splits`, each row = one app record as JSON (`data`) + `user_id`, `updated_at`, `deleted`, `server_updated_at`. A trigger keeps the newest copy when an offline device uploads an older one, and stamps server time for "what changed since". RLS: `auth.uid() = user_id`. Preferences (color style…) live in the user's auth metadata under `gym_tracker_prefs`, not a table (D20).
 
 ### 3.3 Offline-first sync
 
@@ -138,11 +138,11 @@ src/
 | Entity | Fields | Notes |
 | --- | --- | --- |
 | `WorkoutDay` | id, name, order, `exercises[]`, updatedAt, deleted | e.g. Upper 1. Exercises live inside their day |
-| `Exercise` | id, name, kind (`strength` / `check`), targetSets, targetReps, targetText, archived | Archived = removed but history kept. Matched across sheet weeks by `Exercise.keyOf(name)` (case, spaces, punctuation, and "(3)" ignored) |
+| `Exercise` | id, name, kind (`strength` / `check`), targetSets, targetReps, targetText, archived, unit (`lb` / `plates`), aliases | Archived = removed but history kept. Matched across sheet weeks by `Exercise.keyOf(name)` (case, spaces, punctuation, and "(3)" ignored); `aliases` = name keys of old names and merged exercises. `unit` and `aliases` are optional in records saved before v0.3.0 |
 | `Split` | id (`default`), name, `pattern[7]` (Mon-first workout day id or null) | One split for now; backlog b adds many with start dates |
 | `Session` | id = `<dayId>:<date>`, date, workoutDayId, `logs[]`, updatedAt, deleted | One per workout day per date |
 | `ExerciseLog` | exerciseId, `sets[]`, done, note | `done` only for check exercises; note is per exercise per day |
-| `SetEntry` | weight (null = bodyweight), reps | Per set, so "72.5/65 × 5/6" fits |
+| `SetEntry` | weight (null = bodyweight), reps | Per set, so "72.5/65 × 5/6" fits. For a plates exercise, `weight` is plates per side |
 
 Progress metric: **heaviest set weight per session**. Later options: estimated 1-rep max, volume.
 
@@ -184,6 +184,14 @@ Rejected for now: C (sheet grid, past weeks as columns) and D (one exercise per 
 | D18 | 2026-11-21 | Chart shows a dot on every session; dense lines get 2.5 px dots without the ring | Days with more sessions (Lower twice a week) showed no dots while Upper 2 did, which read as inconsistent |
 | D19 | 2026-11-21 | Desktop session table: Exercise · Weight · Reps · Last time · Target, data columns centered in equal-share tracks | What you log comes first; equal tracks give equal gaps (Last time sat right against Reps) |
 | D15 | 2026-11-21 | Sign-in by email + password with Supabase's "Confirm email" off; no emails at all | Supabase blocks template edits (so no codes) until custom SMTP is set up, and its built-in sender only mails org members. Passwords work in the installed iPhone app and Keychain saves them. Revisit with SMTP for multi-user (backlog a) |
+| D20 | 2026-11-22 | Settings follow the account: one snapshot `{ values, updatedAt }` in Supabase user metadata (`gym_tracker_prefs`), newest change wins, ties go to the account's copy. Settings saved before this release count as `1970-01-01T00:00:00.001Z`, untouched defaults as the epoch | "Remember which color was set so it transfers between desktop and phone." User metadata needs no new table or SQL step; the snapshot shape lets more settings sync later. Re-read on app open / foreground / sign-in, at most once a minute otherwise |
+| D21 | 2026-11-22 | Back goes back: history entries are stamped with a depth, the ‹ uses `history.back()` when there's an earlier in-app screen (else a fallback screen), and each entry's scroll position is restored. Moving within a screen (day arrows, Last/Next session, date picker) replaces the entry | Calendar → day → back landed on Home. In the installed iPhone app the in-app ‹ is the only back button |
+| D22 | 2026-11-22 | Home and workout screens: header at the top; the rest centered vertically in the space left (`CenterBlock`); on workout screens it holds its position while a row or note is open; desktop table columns (incl. Exercise) and the open-row editor centered horizontally | User: "Keep the this week and the dates information … at the top and center everything else", and "where the word exercise starts and everything in the row and below … centered". Holding stops the row you tapped from jumping up |
+| D23 | 2026-11-22 | Day arrows step through calendar days: the current workout if logged that day → the only workout logged → (several) the planned one, else a pick list → the planned workout → a Rest day pick list. Last / Next session keep jumping through this workout's history | User picked calendar days over cycling workouts. Home's picked week follows day steps and date picks, but not Last/Next session peeks |
+| D24 | 2026-11-22 | Plates: a per-exercise unit (pounds or plates per side); 1 = a 45, .5 = a 25; rows show `2.5 pl`; the chart converts to pounds on both sides, sled not counted (2.5 → 230 lb), tooltip shows both | User's choice ("Pounds on the chart"); keeps plate lifts on the same axis as the rest |
+| D25 | 2026-11-22 | Merging exercises moves every session's log to the target (same-day logs combine) and deletes the source; renamed and merged names become aliases the importer matches | The sheet had leg press under three names; without aliases a re-import would recreate the merged names |
+| D26 | 2026-11-22 | No loading flashes: the calendar grid comes from the dates, data only adds dots; `useLive(…, cacheAs)` shows a screen's last data instantly while it reloads | Opening Calendar showed 12 empty months for a frame, then reflowed |
+| D27 | 2026-11-22 | Dates read `Mon, Oct 12` and `| Week 42` everywhere | User asked for "Mon, Oct 12 | Week 42" on the workout screen; the same format elsewhere keeps it consistent |
 
 ### 5.3 Design lessons learned
 
@@ -201,6 +209,11 @@ From this project:
 - **Supabase free projects can't edit auth emails without custom SMTP** (checked 2026-11-21): the template page says "Set up custom SMTP to edit templates", and the built-in sender only delivers to organization members. Don't design a sign-in flow around custom email text until SMTP exists.
 - **Inputs don't inherit muted label colors.** A day-name input inside a gray `<label>` rendered gray (inputs inherit `color` here), so `.field` sets its own text color.
 - **Equal gaps need equal tracks.** Right-aligned Reps next to a left-aligned Last time column looked cramped no matter the gap; centering every data column in same-width tracks fixed it.
+- **Inline label parts run together.** "Year the sheet starts in" and its hint were two `<span>`s, which rendered as one line ("…starts inGuessed…"). `.setting .text > *` is now `display: block`.
+- **An inline-block dot sits on the text baseline.** In a 7 px slot it overflowed ~10 px downward onto the picked day's border; a grid slot centers it.
+- **Don't slide the buttons.** Sliding the whole workout screen on a day change moved the ‹ › arrows under a quick second tap, which then hit the other arrow. Only the content below the header slides now.
+- **Draw structure before data.** A screen whose layout depends on loaded data flashes and reflows on every visit; render what doesn't need data (the calendar grid) right away.
+- **Name keys can collide.** "Leg press" and "Legpress" share the key `legpress`, so key-based matching treats them as one exercise already; tests need names with distinct keys.
 - **Testing tips:** headless Chrome/Brave won't make a window narrower than ~500 px, so screenshot phone layouts inside a 393 px iframe or the browser pane's mobile viewport; `--virtual-time-budget` screenshots don't wait for lazy-loaded chunks.
 
 ---
@@ -216,7 +229,7 @@ Rules (`MonthGridImporter`):
 - **Weights:** `72.5/65` per set; one weight applies to all sets; `25 lbs` ok; `Body Weight` = bodyweight; text like `35(down)`, `No straps`, `7ish?` is kept as that day's note.
 - **A weight with no reps is treated as planned, not done** (the sheet pre-fills weights). 41 such rows in the real export.
 - **Copied weeks:** a week identical to the week before for the same day is skipped by default (24 in the real export).
-- **Exercises:** matched by name key; the latest week decides what's active, older names become archived (kept for history). `(n)` in a name sets target sets.
+- **Exercises:** matched by name key; the latest week decides what's active, older names become archived (kept for history). `(n)` in a name sets target sets. Names you renamed or merged in the app are aliases, so a re-import lands their rows on the exercise you kept (D25). An exercise you deleted comes back if the sheet still has it.
 - **Cardio rows** (`Cardio 1`, `Cardio 2`) become one done / not-done "Cardio" exercise; each starts a new Abs/Cardio session.
 
 Real export result (2026-11-21): Upper 1 21 sessions, Lower 22, Upper 2 15, Abs/Cardio 5 (Feb 2 – Oct 20, 2026).
@@ -248,10 +261,13 @@ Real export result (2026-11-21): Upper 1 21 sessions, Lower 22, Upper 2 15, Abs/
 
 - [ ] Lower on both Tue and Fri? The sheet has one Lower per week; the split above assumes both. Set it in the import preview or Settings → Workout Days.
 - [ ] Rename "ABS/Cardio" from the sheet to "Abs/Cardio" after import? (Settings → Workout Days.)
+- [ ] Merge the old leg press names ("Leg Press (Busy)(Plates)", "leg press(plates)", "Legpress") into one, and set it to plates? (Progress → Lower → Edit.)
 
 ---
 
 ## 9. Changelog
+
+- **2026-11-22** — v0.3.0, from the first round of testing with real data. Import: labels and hints on separate lines, "Skip copied weeks" switch, start year field you can retype, weekday buttons wrap on phones. Color style (and "Show last session's numbers") sync through the account (D20). Back returns to the screen you came from, with its scroll position (D21). Calendar no longer flashes; screens show their last data instantly (D26). Home: week arrows and swipe, rows centered below the header (D22). Workout screens: Last / Next session buttons, day arrows through calendar days with a Rest day screen (D23), date `Mon, Oct 12 | Week 42`, desktop columns and editor centered, list centered and steady when a row opens. Week strip dots no longer sit on the border. Exercises: rename, merge, bring back, delete with history, from Progress → Edit (D25). Plates per side for exercises like leg press, charted in pounds (D24). 48 unit tests.
 
 - **2026-11-21** — v0.2.0. Home: centered day rows (centered column on desktop). Session: phone meta reads `2×8 | Last: 20 – 8/6/6`; desktop table reordered to Weight · Reps · Last time · Target with even spacing. Workout Days: "Days" capitalized, collapsible cards (collapsed by default), cleaner one-line exercise editor. Progress: dots on every day's lines. Progress, Calendar, and Home remember their selections across tab switches (D16–D19). First push to GitHub and Pages deploy.
 - **2026-11-21** — Sign-in switched from emailed codes to email + password (D15) after Supabase's template page turned out to need custom SMTP. Supabase guide rewritten field by field from the dashboard's current source.

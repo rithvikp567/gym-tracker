@@ -33,6 +33,11 @@ export function useViewState<T>(key: string, fallback: () => T, scope: ViewState
   return [value, set];
 }
 
+/** Sets another screen's remembered view from outside it (e.g. Home's picked day follows the day arrows). */
+export function setViewState(key: string, value: unknown, scope: ViewStateScope = "session"): void {
+  write(key, value, scope);
+}
+
 function read(key: string, scope: ViewStateScope): unknown {
   if (memory.has(key)) return memory.get(key);
   if (scope !== "device") return undefined;

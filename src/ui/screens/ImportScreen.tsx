@@ -4,7 +4,7 @@ import type { ImportOptions } from "../../importers/SheetImporter";
 import type { WorkbookTab } from "../../importers/readWorkbook";
 import type { ImportResult } from "../../services/ImportService";
 import { Icon } from "../components/Icon";
-import { ScreenHead } from "../components/controls";
+import { BackLink, ScreenHead, Toggle } from "../components/controls";
 import { href } from "../router";
 import { useServices } from "../ServicesContext";
 
@@ -79,11 +79,7 @@ export function ImportScreen() {
       <ScreenHead
         title="Import"
         sub="From a Google Sheets download (.xlsx)"
-        actions={
-          <a className="link" href={href({ name: "settings" })}>
-            Close
-          </a>
-        }
+        actions={<BackLink fallback={{ name: "settings" }}>Close</BackLink>}
       />
 
       {result ? (
@@ -128,30 +124,27 @@ export function ImportScreen() {
 
           {options && plan && (
             <>
-              <div className="card stack">
-                <label className="setting">
-                  <span className="text">
-                    <span>Year the sheet starts in</span>
-                    <span className="desc">Guessed from the sheet. Months after December roll into the next year.</span>
-                  </span>
-                  <input
-                    className="field num"
-                    style={{ width: 96 }}
-                    inputMode="numeric"
+              <div className="card import-options">
+                <div className="setting">
+                  <label className="text" htmlFor="import-year">
+                    <span className="title">Year the sheet starts in</span>
+                    <span className="desc">Guessed from the sheet. Months after December count as the next year.</span>
+                  </label>
+                  {/* A new file or tab brings a new guess, so the field starts over. */}
+                  <YearField
+                    key={`${fileName}/${tabName}`}
+                    id="import-year"
                     value={options.startYear}
-                    onChange={(e) => {
-                      const y = Number.parseInt(e.target.value, 10);
-                      if (y > 1990 && y < 2100) setOptions({ ...options, startYear: y });
-                    }}
+                    onChange={(startYear) => setOptions({ ...options, startYear })}
                   />
-                </label>
-                <label className="setting">
-                  <span className="text">
-                    <span>Skip copied weeks</span>
-                    <span className="desc">Leaves out weeks that exactly match the week before (pre-filled, not done).</span>
-                  </span>
-                  <input type="checkbox" checked={options.skipCopies} onChange={(e) => setOptions({ ...options, skipCopies: e.target.checked })} />
-                </label>
+                </div>
+                <div className="setting">
+                  <div className="text" id="import-skip-label">
+                    <span className="title">Skip copied weeks</span>
+                    <span className="desc">Leaves out weeks that are an exact copy of the week before. The sheet pre-fills those, so they weren't really done.</span>
+                  </div>
+                  <Toggle label="Skip copied weeks" checked={options.skipCopies} onChange={(skipCopies) => setOptions({ ...options, skipCopies })} />
+                </div>
               </div>
 
               <div className="section-title">Which days do you do each workout?</div>
@@ -164,7 +157,7 @@ export function ImportScreen() {
                   const dates = day.sessions.map((s) => s.date);
                   const active = day.exercises.filter((e) => e.active);
                   return (
-                    <div className="list-row" key={day.name} style={{ flexWrap: "wrap" }}>
+                    <div className="list-row import-day" key={day.name}>
                       <div className="grow">
                         <div className="title">{day.name}</div>
                         <div className="meta num">
@@ -217,5 +210,29 @@ export function ImportScreen() {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * The start year. Typing is free (so "2" → "20" → "2026" works); it only applies once it's a
+ * real year, and snaps back to the last good one when you leave the field.
+ */
+function YearField({ id, value, onChange }: { id: string; value: number; onChange: (year: number) => void }) {
+  const [text, setText] = useState(String(value));
+  const valid = (t: string) => /^\d{4}$/.test(t) && Number(t) > 1990 && Number(t) < 2100;
+  return (
+    <input
+      id={id}
+      className="field num year-field"
+      inputMode="numeric"
+      maxLength={4}
+      value={text}
+      onChange={(e) => {
+        const t = e.target.value.replace(/\D/g, "");
+        setText(t);
+        if (valid(t)) onChange(Number(t));
+      }}
+      onBlur={() => !valid(text) && setText(String(value))}
+    />
   );
 }

@@ -47,6 +47,9 @@ export async function createAppServices(): Promise<AppServices> {
     sync = new SupabaseSync(url, key, store, () => repos.notifyExternalChange());
   }
 
+  const settings = new SettingsService(browserKeyValueStore(), systemClock);
+  sync.attachPreferences(settings);
+
   return {
     mode: demo ? "demo" : "device",
     changes: repos.changes,
@@ -56,7 +59,7 @@ export async function createAppServices(): Promise<AppServices> {
     progress: new ProgressService(repos, systemClock),
     imports: new ImportService(repos),
     backup: new BackupService(repos),
-    settings: new SettingsService(browserKeyValueStore()),
+    settings,
     sync,
   };
 }

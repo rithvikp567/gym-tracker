@@ -1,5 +1,4 @@
 import { useEffect, useMemo } from "react";
-import { formatNumber } from "../../../domain/SetEntry";
 import { RANGES, type ProgressLine, type RangeKey } from "../../../services/ProgressService";
 import { ScreenHead, Segmented } from "../../components/controls";
 import { useViewState } from "../../hooks/useViewState";
@@ -19,13 +18,13 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
   const { theme } = useSettings();
   const [range, setRange] = useViewState<RangeKey>("progress.range", () => "6M", "device");
   const [lastDayId, setLastDayId] = useViewState<string | null>("progress.day", () => null, "device");
-  const days = useLive(() => setup.days(), []);
+  const days = useLive(() => setup.days(), [], "days");
   // The Progress tab links to #/progress with no day: use the one picked last time.
   const day = days?.find((d) => d.id === (routeDayId ?? lastDayId)) ?? days?.[0];
   useEffect(() => {
     if (day && day.id !== lastDayId) setLastDayId(day.id);
   }, [day, lastDayId, setLastDayId]);
-  const data = useLive(() => (day ? progress.lines(day.id, range) : Promise.resolve(null)), [day?.id ?? null, range]);
+  const data = useLive(() => (day ? progress.lines(day.id, range) : Promise.resolve(null)), [day?.id ?? null, range], "progress");
 
   // Color follows the exercise (its slot on the day), never its position among visible lines.
   const colors = useMemo(() => {
@@ -72,7 +71,10 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
 
   return (
     <>
-      <ScreenHead title="Progress" sub="Heaviest set each session" />
+      <ScreenHead
+        title="Progress"
+        sub={day.allExercises().some((e) => e.unit === "plates") ? "Heaviest set each session · plates counted in lb" : "Heaviest set each session"}
+      />
       <div className="progress-controls">
         <Segmented
           label="Workout day"
@@ -101,6 +103,10 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
               <button type="button" className="link" onClick={() => setHidden(new Set(lines.map((l) => l.exercise.id)))}>
                 None
               </button>
+              {/* Rename, merge (e.g. old spellings of one lift), restore, or delete exercises. */}
+              <a className="link" href={href({ name: "setup", dayId: day.id })}>
+                Edit
+              </a>
             </span>
           </div>
           <div className="series-chips">
@@ -114,6 +120,7 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
               >
                 <span className="swatch" style={{ background: colors.get(line.exercise.id) ?? "var(--series-other)" }} />
                 {line.exercise.name}
+                {line.exercise.unit === "plates" && <span className="archived">plates</span>}
                 {line.exercise.archived && <span className="archived">old</span>}
               </button>
             ))}
@@ -130,7 +137,7 @@ function DataTable({ lines }: { lines: ProgressLine[] }) {
   const dates = [...new Set(lines.flatMap((l) => l.points.map((p) => p.date.toString())))].sort().reverse();
   const value = (line: ProgressLine, date: string) => {
     const p = line.points.find((x) => x.date.toString() === date);
-    return p ? formatNumber(p.weight) : "";
+    return p ? p.label : "";
   };
   return (
     <details style={{ marginTop: 14 }}>

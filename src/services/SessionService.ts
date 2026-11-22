@@ -60,6 +60,16 @@ export class SessionService {
     return out;
   }
 
+  /** For each workout day, the last date it was done on or before `date` ("last Oct 12"). */
+  async lastWorkoutDates(date: LocalDate): Promise<Map<string, LocalDate>> {
+    const out = new Map<string, LocalDate>();
+    // Oldest first, so later sessions overwrite earlier ones.
+    for (const s of await this.repos.sessions.all()) {
+      if (s.isWorkout() && !s.date.isAfter(date)) out.set(s.workoutDayId, s.date);
+    }
+    return out;
+  }
+
   /** Everything logged on a date (calendar tap). */
   async onDate(date: LocalDate): Promise<Session[]> {
     return (await this.repos.sessions.onDate(date)).filter((s) => s.hasContent());

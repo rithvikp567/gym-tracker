@@ -112,6 +112,7 @@ On the phone (once the site is deployed), open it, sign in with the same email a
     set encrypted_password = extensions.crypt('new-password-here', extensions.gen_salt('bf'))
     where email = 'you@example.com';
     ```
+- **Your color style follows your account.** Settings (color style, "Show last session's numbers") are saved in your user's metadata (**Authentication → Users →** your user → `gym_tracker_prefs`), so there's nothing to set up and no table for them. The newest change wins: pick the style once on any signed-in device and the others match the next time they open.
 - **Free projects pause after 7 days with no activity.** Logging a few times a week keeps yours awake. If it pauses (e.g. on vacation), restore it from the dashboard. The app keeps working offline meanwhile and syncs when the project is back.
 - **Before opening it to friends** (backlog a): set up custom SMTP (e.g. Resend's free tier, which needs a domain you own) so Supabase can send confirmation and password-reset emails to anyone. Then turn **Confirm email** back on and set **URL Configuration → Site URL** to `https://rithvikp567.github.io/gym-tracker/`.
 - **Limits** (check supabase.com/pricing): 500 MB database, 1 GB file storage, 50k monthly users. Years of logs take a few MB.

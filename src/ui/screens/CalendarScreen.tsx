@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { LocalDate, MONTH_LONG, WEEKDAY_LETTER } from "../../domain/LocalDate";
 import type { CalendarDay } from "../../services/CalendarService";
 import { Icon } from "../components/Icon";
@@ -6,6 +6,11 @@ import { Sheet } from "../components/controls";
 import { useViewState } from "../hooks/useViewState";
 import { href, navigate } from "../router";
 import { useLive, useServices } from "../ServicesContext";
+
+/** Every date of a year, grouped by month (Jan = 0). Drawn before the data loads so nothing jumps. */
+function monthsOf(year: number): LocalDate[][] {
+  return Array.from({ length: 12 }, (_, m) => Array.from({ length: LocalDate.daysInMonth(year, m + 1) }, (_, i) => LocalDate.of(year, m + 1, i + 1)));
+}
 
 /** Year view: 12 months, a green dot for every workout, red for a missed planned day. */
 export function CalendarScreen({ year: routeYear }: { year: number | null }) {
@@ -19,16 +24,24 @@ export function CalendarScreen({ year: routeYear }: { year: number | null }) {
   }, [year, lastYear, setLastYear]);
   const [picked, setPicked] = useState<CalendarDay | null>(null);
 
-  const data = useLive(async () => {
-    const [days, workoutDays] = await Promise.all([calendar.year(year), setup.days()]);
-    return { days, workoutDays };
-  }, [year, today.toString()]);
+  const data = useLive(
+    async () => {
+      const [days, workoutDays] = await Promise.all([calendar.year(year), setup.days()]);
+      return { days, workoutDays };
+    },
+    [year, today.toString()],
+    "calendar",
+  );
 
+  // The grid comes from the dates alone; the data only adds dots, so the page never reflows.
+  const months = useMemo(() => monthsOf(year), [year]);
+  const byDate = useMemo(() => new Map(data?.days.map((d) => [d.date.toString(), d]) ?? []), [data]);
   const workouts = data?.days.filter((d) => d.status === "done").length ?? 0;
-  const months = Array.from({ length: 12 }, (_, m) => data?.days.filter((d) => d.date.month === m + 1) ?? []);
   const nameOf = (id: string) => data?.workoutDays.find((d) => d.id === id)?.name ?? "Workout";
 
-  const open = (day: CalendarDay) => {
+  const open = (date: LocalDate) => {
+    const day = byDate.get(date.toString());
+    if (!day) return; // still loading
     const logged = day.sessions.filter((s) => s.hasContent());
     if (logged.length === 1) navigate({ name: "session", dayId: logged[0]!.workoutDayId, date: day.date.toString() });
     else setPicked(day);
@@ -47,7 +60,7 @@ export function CalendarScreen({ year: routeYear }: { year: number | null }) {
           </a>
         </div>
         <div className="sub num" style={{ alignSelf: "center" }}>
-          {workouts} workout{workouts === 1 ? "" : "s"}
+          {data ? `${workouts} workout${workouts === 1 ? "" : "s"}` : "\u00a0"}
         </div>
       </header>
 
@@ -61,7 +74,7 @@ export function CalendarScreen({ year: routeYear }: { year: number | null }) {
       </div>
 
       <div className="months">
-        {months.map((days, m) => (
+        {months.map((dates, m) => (
           <section className="month" key={m} aria-label={MONTH_LONG[m]}>
             <h3>{MONTH_LONG[m]}</h3>
             <div className="month-grid">
@@ -70,19 +83,24 @@ export function CalendarScreen({ year: routeYear }: { year: number | null }) {
                   {l}
                 </span>
               ))}
-              {days.length > 0 && Array.from({ length: days[0]!.date.weekday() }, (_, i) => <span key={`pad${i}`} />)}
-              {days.map((d) => (
-                <button
-                  key={d.date.toString()}
-                  type="button"
-                  className={`cal-day${d.date.equals(today) ? " today" : ""}${d.date.isAfter(today) ? " future" : ""}`}
-                  aria-label={`${d.date.label()}${d.status === "done" ? ", worked out" : d.status === "missed" ? ", missed" : ""}`}
-                  onClick={() => open(d)}
-                >
-                  {d.date.day}
-                  <span className="dot-slot">{(d.status === "done" || d.status === "missed") && <span className={`dot ${d.status}`} />}</span>
-                </button>
+              {Array.from({ length: dates[0]!.weekday() }, (_, i) => (
+                <span key={`pad${i}`} />
               ))}
+              {dates.map((date) => {
+                const status = byDate.get(date.toString())?.status;
+                return (
+                  <button
+                    key={date.toString()}
+                    type="button"
+                    className={`cal-day${date.equals(today) ? " today" : ""}${date.isAfter(today) ? " future" : ""}`}
+                    aria-label={`${date.label()}${status === "done" ? ", worked out" : status === "missed" ? ", missed" : ""}`}
+                    onClick={() => open(date)}
+                  >
+                    {date.day}
+                    <span className="dot-slot">{(status === "done" || status === "missed") && <span className={`dot ${status}`} />}</span>
+                  </button>
+                );
+              })}
             </div>
           </section>
         ))}

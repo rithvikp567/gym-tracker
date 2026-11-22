@@ -65,9 +65,30 @@ export interface SyncStatus {
   message: string | null;
 }
 
+/**
+ * Preferences that follow the account to the user's other devices (color style…), as one
+ * snapshot. The newest change wins, like records.
+ */
+export interface PreferencesSnapshot {
+  values: Record<string, unknown>;
+  /** ISO time of the last change on any device; EPOCH = never changed (still the defaults). */
+  updatedAt: string;
+}
+
+/** Implemented by SettingsService; read and updated by sync. */
+export interface SyncedPreferences {
+  snapshot(): PreferencesSnapshot;
+  /** Applies a newer copy from another device without queueing it for upload again. */
+  applyRemote(snapshot: PreferencesSnapshot): void;
+  /** Fires after a change made on this device. */
+  onLocalChange(listener: () => void): Unsubscribe;
+}
+
 /** Account + sync, as the UI sees it. `NoSync` is used when no backend is configured. */
 export interface SyncController {
   readonly configured: boolean;
+  /** Hands sync the preferences to keep in step with the account (call once at startup). */
+  attachPreferences(preferences: SyncedPreferences): void;
   status(): SyncStatus;
   subscribe(listener: (status: SyncStatus) => void): Unsubscribe;
   signIn(email: string, password: string): Promise<void>;
