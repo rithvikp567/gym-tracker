@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect } from "react";
+import { lazy, Suspense, useLayoutEffect } from "react";
 import type { AppServices } from "../app/AppServices";
 import { applyPendingScroll, useRoute, type Route } from "./router";
 import { CalendarScreen } from "./screens/CalendarScreen";
@@ -11,7 +11,8 @@ const ProgressScreen = lazy(() => import("./screens/progress/ProgressScreen").th
 import { SessionScreen } from "./screens/session/SessionScreen";
 import { SettingsScreen } from "./screens/settings/SettingsScreen";
 import { SetupScreen } from "./screens/SetupScreen";
-import { ServicesProvider, useSettings } from "./ServicesContext";
+import { LookSync } from "./LookSync";
+import { ServicesProvider } from "./ServicesContext";
 import { Shell } from "./Shell";
 
 function Screen({ route }: { route: Route }) {
@@ -40,24 +41,13 @@ function Screen({ route }: { route: Route }) {
   }
 }
 
-/** Keeps <html data-theme> and the browser's theme color in step with the setting. */
-function ThemeSync() {
-  const { theme } = useSettings();
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", bg);
-  }, [theme]);
-  return null;
-}
-
 export function App({ services }: { services: AppServices }) {
   const route = useRoute();
   // After each navigation: top of the page, or where you were when going back.
   useLayoutEffect(applyPendingScroll, [route]);
   return (
     <ServicesProvider services={services}>
-      <ThemeSync />
+      <LookSync />
       <Shell route={route}>
         <Screen route={route} />
       </Shell>

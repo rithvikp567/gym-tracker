@@ -1,16 +1,33 @@
 /*
  * Design tokens. Every color, radius, and spacing the UI uses comes from here, so a theme
- * is just a different set of values (and user-picked colors later are a token override).
+ * is just a different set of values. The look is a theme and an accent color, each the
+ * user's pick (Settings → Appearance; the lists are in services/SettingsService.ts).
  *
- *   oled      – true black, hairline dividers, lime accent   (default)
- *   graphite  – charcoal, raised rounded cards, blue accent
+ * <html> carries the pick (index.html's head script paints it before the first frame, then
+ * ui/LookSync.tsx keeps it in step with the settings):
+ *   data-family  light | dark: the browser's color scheme, and which fill each accent uses
+ *   data-theme   light, sand, mist (light) · oled, graphite, midnight (dark): surfaces and text.
+ *                custom: no rule here; ui/theme/look.ts derives every theme token from the
+ *                user's color and LookSync sets them on <html> (the "token override")
+ *   data-accent  lime, ink, blue, teal, amber, orange, purple, pink. custom: its fill and
+ *                text color are set on <html> the same way
+ * The selectors are bare attributes, so an element with its own data-theme / data-family /
+ * data-accent (the previews in Settings) shows that look inside it.
+ * Each theme sets the same tokens (tests/look.test.ts checks), and THEME_BG in look.ts
+ * repeats each --bg for the browser bar.
  */
+
+/* ───────────── Dark themes ───────────── */
+
+/* OLED: true black, hairline rows (the default) */
 :root,
-:root[data-theme="oled"] {
-  color-scheme: dark;
+[data-theme="oled"] {
   --bg: #000000;
+  --panel: #0c0c0d;
   --surface: #0e0e0f;
   --surface-raised: #18181a;
+  --tile: #161618;
+  --tile-line: #242427;
   --row-bg: transparent;
   --row-radius: 0px;
   --row-gap: 0px;
@@ -21,21 +38,18 @@
   --text: #f2f2f2;
   --text-2: #9b9ba0;
   --text-3: #6f6f75;
-  --accent: #c6f432;
-  --accent-ink: #0d1200;
-  --accent-soft: rgba(198, 244, 50, 0.12);
   --chart-grid: #1f1f21;
   --chart-axis: #6f6f75;
-  --panel: #0c0c0d;
-  --tile: #161618;
-  --tile-line: #242427;
-  --accent-line: color-mix(in srgb, var(--accent) 35%, var(--tile-line));
 }
 
-:root[data-theme="graphite"] {
+/* Graphite: charcoal, raised rounded rows */
+[data-theme="graphite"] {
   --bg: #121214;
+  --panel: #18181b;
   --surface: #1c1c20;
   --surface-raised: #26262b;
+  --tile: #222226;
+  --tile-line: #313137;
   --row-bg: #1c1c20;
   --row-radius: 14px;
   --row-gap: 8px;
@@ -46,16 +60,187 @@
   --text: #ededf0;
   --text-2: #a3a3ab;
   --text-3: #76767e;
-  --accent: #7db7ff;
-  --accent-ink: #00152e;
-  --accent-soft: rgba(125, 183, 255, 0.14);
   --chart-grid: #2a2a2f;
   --chart-axis: #76767e;
-  --panel: #18181b;
-  --tile: #222226;
-  --tile-line: #313137;
+}
+
+/* Midnight: deep blue */
+[data-theme="midnight"] {
+  --bg: #0e131b;
+  --panel: #131a24;
+  --surface: #151c26;
+  --surface-raised: #222c3a;
+  --tile: #1a2230;
+  --tile-line: #283345;
+  --row-bg: #151c26;
+  --row-radius: 14px;
+  --row-gap: 8px;
+  --row-pad-x: 14px;
+  --row-divider: transparent;
+  --hairline: #232d39;
+  --hairline-strong: #354153;
+  --text: #e6ebf1;
+  --text-2: #9ea9b6;
+  --text-3: #727e8c;
+  --chart-grid: #1e2733;
+  --chart-axis: #727e8c;
+}
+
+/* ───────────── Light themes: white cards on a soft page ───────────── */
+
+/* Light: warm off-white */
+[data-theme="light"] {
+  --bg: #f5f4f0;
+  --panel: #ebeae5;
+  --surface: #ffffff;
+  --surface-raised: #eeede8;
+  --tile: #ffffff;
+  --tile-line: #e2dfd8;
+  --row-bg: #ffffff;
+  --row-radius: 14px;
+  --row-gap: 8px;
+  --row-pad-x: 14px;
+  --row-divider: transparent;
+  --hairline: #e2dfd8;
+  --hairline-strong: #cdc9c0;
+  --text: #1b1b19;
+  --text-2: #5e5c57;
+  --text-3: #807d76;
+  --chart-grid: #ebe9e3;
+  --chart-axis: #807d76;
+}
+
+/* Sand: warm, like paper */
+[data-theme="sand"] {
+  --bg: #f3ecde;
+  --panel: #e9e0ce;
+  --surface: #fcf8f0;
+  --surface-raised: #ece4d4;
+  --tile: #fcf8f0;
+  --tile-line: #e0d5c0;
+  --row-bg: #fcf8f0;
+  --row-radius: 14px;
+  --row-gap: 8px;
+  --row-pad-x: 14px;
+  --row-divider: transparent;
+  --hairline: #e0d5c0;
+  --hairline-strong: #cbbfa6;
+  --text: #2a2118;
+  --text-2: #665847;
+  --text-3: #86775f;
+  --chart-grid: #e8dfcd;
+  --chart-axis: #86775f;
+}
+
+/* Mist: cool grey-blue */
+[data-theme="mist"] {
+  --bg: #eef2f5;
+  --panel: #e2e8ee;
+  --surface: #ffffff;
+  --surface-raised: #e6ecf1;
+  --tile: #ffffff;
+  --tile-line: #d8e0e7;
+  --row-bg: #ffffff;
+  --row-radius: 14px;
+  --row-gap: 8px;
+  --row-pad-x: 14px;
+  --row-divider: transparent;
+  --hairline: #d8e0e7;
+  --hairline-strong: #c0cad4;
+  --text: #16202a;
+  --text-2: #4e5a66;
+  --text-3: #77838f;
+  --chart-grid: #e3e9ee;
+  --chart-axis: #77838f;
+}
+
+/* ───────────── Accent colors ─────────────
+   A fill for light themes (-l) and one for dark themes (-d), each with the text color on it
+   (-ink-). Every pair is at least 4.5:1, and each fill reads at 4.5:1 as text on its family's
+   backgrounds, panels and tiles (tests/look.test.ts). */
+
+/* Lime: the app's original accent (the default) */
+:root,
+[data-accent="lime"] {
+  --accent-l: #3f6a0a;
+  --accent-ink-l: #ffffff;
+  --accent-d: #c6f432;
+  --accent-ink-d: #0d1200;
+}
+
+/* Ink: the text color, with the background as the text on it (`initial` = use the fallback below) */
+[data-accent="ink"] {
+  --accent-l: initial;
+  --accent-ink-l: initial;
+  --accent-d: initial;
+  --accent-ink-d: initial;
+}
+
+/* Blue: Graphite's original accent */
+[data-accent="blue"] {
+  --accent-l: #2a5f9e;
+  --accent-ink-l: #ffffff;
+  --accent-d: #7db7ff;
+  --accent-ink-d: #00152e;
+}
+
+[data-accent="teal"] {
+  --accent-l: #0c6a65;
+  --accent-ink-l: #ffffff;
+  --accent-d: #4fd1c5;
+  --accent-ink-d: #00201d;
+}
+
+[data-accent="amber"] {
+  --accent-l: #805b0e;
+  --accent-ink-l: #ffffff;
+  --accent-d: #f2b84b;
+  --accent-ink-d: #241500;
+}
+
+[data-accent="orange"] {
+  --accent-l: #9e4219;
+  --accent-ink-l: #ffffff;
+  --accent-d: #ff9a62;
+  --accent-ink-d: #2a0e00;
+}
+
+[data-accent="purple"] {
+  --accent-l: #6a48ae;
+  --accent-ink-l: #ffffff;
+  --accent-d: #b9a2f2;
+  --accent-ink-d: #1a0b3d;
+}
+
+[data-accent="pink"] {
+  --accent-l: #a33361;
+  --accent-ink-l: #ffffff;
+  --accent-d: #f48dbb;
+  --accent-ink-d: #33061a;
+}
+
+/* ───────────── Families: what the accent drives ─────────────
+   Declared with data-family so each preview (and <html>) works them out from its own theme
+   and accent: custom properties resolve where they're declared, then inherit as values. */
+
+:root,
+[data-family="dark"] {
+  color-scheme: dark;
+  --accent: var(--accent-d, var(--text));
+  --accent-ink: var(--accent-ink-d, var(--bg));
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --accent-line: color-mix(in srgb, var(--accent) 35%, var(--tile-line));
 }
+
+[data-family="light"] {
+  color-scheme: light;
+  --accent: var(--accent-l, var(--text));
+  --accent-ink: var(--accent-ink-l, var(--bg));
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 35%, var(--tile-line));
+}
+
+/* ───────────── The same in every theme ───────────── */
 
 :root {
   /* Status colors are fixed across themes: green = trained, red = missed. */

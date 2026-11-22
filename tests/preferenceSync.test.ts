@@ -407,7 +407,42 @@ describe("SupabaseSync preferences", () => {
     vi.setSystemTime(start + 20_000);
     settings.update({ showLastSession: false }); // this window, still showing OLED, toggles at T2
     await settle();
-    expect(settings.get()).toEqual({ theme: "graphite", showLastSession: false });
-    expect(accountPrefs()?.values).toEqual({ theme: "graphite", showLastSession: false });
+    expect(settings.get()).toMatchObject({ theme: "graphite", showLastSession: false });
+    expect(accountPrefs()?.values).toMatchObject({ theme: "graphite", showLastSession: false });
+  });
+
+  it("brings a custom theme, accent and recent colors picked on the phone to this device", async () => {
+    const at = iso(start + 5_000);
+    const values = {
+      theme: "custom",
+      customThemeColor: "#1e2a44",
+      accent: "custom",
+      customAccentColor: "#ff6a3dcc",
+      recentThemeColors: ["#1e2a44", "#3b2f4a"],
+      recentAccentColors: ["#ff6a3dcc"],
+      showLastSession: true,
+    };
+    const keys = ["theme", "customThemeColor", "accent", "customAccentColor", "recentThemeColors", "recentAccentColors"];
+    supabase.account.metadata.gym_tracker_prefs = { values, updatedAt: at, stamps: Object.fromEntries(keys.map((k) => [k, at])) };
+    await sync.syncNow();
+    expect(settings.get()).toEqual(values);
+  });
+
+  it("uploads a custom look picked here, setting by setting", async () => {
+    vi.setSystemTime(start + 30_000);
+    settings.update({ theme: "custom", customThemeColor: "#f4e9d8", recentThemeColors: ["#f4e9d8"] });
+    await settle();
+    expect(accountPrefs()?.values).toMatchObject({ theme: "custom", customThemeColor: "#f4e9d8", recentThemeColors: ["#f4e9d8"] });
+    expect(accountPrefs()?.stamps).toMatchObject({ theme: iso(start + 30_000), customThemeColor: iso(start + 30_000) });
+    // The phone then picks an accent: this device takes it without losing its theme.
+    const phoneAt = iso(start + 40_000);
+    const account = accountPrefs()!;
+    supabase.account.metadata.gym_tracker_prefs = {
+      values: { ...account.values, accent: "purple" },
+      updatedAt: phoneAt,
+      stamps: { ...account.stamps, accent: phoneAt },
+    };
+    await sync.syncNow();
+    expect(settings.get()).toMatchObject({ theme: "custom", customThemeColor: "#f4e9d8", accent: "purple" });
   });
 });

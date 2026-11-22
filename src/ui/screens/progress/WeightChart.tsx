@@ -14,6 +14,7 @@ import { LocalDate, MONTH_SHORT } from "../../../domain/LocalDate";
 import { formatNumber } from "../../../domain/SetEntry";
 import type { ProgressData, RangeKey } from "../../../services/ProgressService";
 import type { ThemeName } from "../../../services/SettingsService";
+import { useSettings } from "../../ServicesContext";
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, Tooltip);
 
@@ -100,6 +101,8 @@ export function WeightChart({
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const chart = useRef<Chart<"line", Point[]> | null>(null);
+  // A Custom theme keeps the id "custom" when its color changes: rebuild for the color too.
+  const { customThemeColor } = useSettings();
 
   useEffect(() => {
     if (!canvas.current) return;
@@ -192,7 +195,7 @@ export function WeightChart({
     };
     // Rebuild when the data, range, colors, or theme change; visibility is handled below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, range, colors, theme]);
+  }, [data, range, colors, theme, theme === "custom" ? customThemeColor : null]);
 
   useEffect(() => {
     const c = chart.current;

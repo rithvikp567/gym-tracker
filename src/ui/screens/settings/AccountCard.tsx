@@ -43,22 +43,26 @@ export function AccountCard() {
 
   if (status.email) {
     const last = status.lastSyncedAt ? status.lastSyncedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null;
+    // One row: who's signed in (and the sync status) on the left; Sign out and Sync side by side on the right.
     return (
       <div className="card stack">
-        <div className="setting">
+        <div className="setting account-row">
           <div className="text">
-            <div>{status.email}</div>
+            <div className="account-email">{breakableEmail(status.email)}</div>
             <div className="desc">
               {status.state === "syncing" ? "Syncing…" : status.message ?? (last ? `Synced at ${last}` : "Signed in")}
             </div>
           </div>
-          <button type="button" className="btn" disabled={busy} onClick={() => void run(() => sync.syncNow())}>
-            <Icon name="refresh" size={16} /> Sync
-          </button>
+          <div className="account-actions">
+            <button type="button" className="btn account-btn" onClick={() => void run(() => sync.signOut())}>
+              Sign out
+            </button>
+            <button type="button" className="btn account-btn" disabled={busy} onClick={() => void run(() => sync.syncNow())}>
+              <Icon name="refresh" size={16} /> Sync
+            </button>
+          </div>
         </div>
-        <button type="button" className="btn ghost" onClick={() => void run(() => sync.signOut())}>
-          Sign out
-        </button>
+        {error && <div className="error-text">{error}</div>}
       </div>
     );
   }
@@ -112,5 +116,18 @@ export function AccountCard() {
         {creating ? "I already have an account" : "Create an account"}
       </button>
     </form>
+  );
+}
+
+/** The address with a line-break chance after the "@", so a narrow phone wraps it as "name@" / "gmail.com". */
+function breakableEmail(email: string) {
+  const at = email.lastIndexOf("@");
+  if (at < 0) return email;
+  return (
+    <>
+      {email.slice(0, at + 1)}
+      <wbr />
+      {email.slice(at + 1)}
+    </>
   );
 }

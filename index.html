@@ -7,12 +7,46 @@
     <meta name="color-scheme" content="dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- default, not black-translucent: the iPhone's clock and battery stay readable on light themes -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Gym" />
     <meta name="description" content="Track sets, reps, and weight across weeks, months, and years." />
     <link rel="icon" href="icons/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
     <title>Gym Tracker</title>
+    <!-- The look, before the first frame: the one this device showed last, which ui/LookSync.tsx
+         saves as "gym-tracker.look" (theme, accent and family ids, the background for the browser
+         bar, and a Custom theme's or accent's tokens, already worked out). It does what LookSync's
+         applyLook does; tests/look.test.ts runs both. Nothing saved: the defaults in tokens.css
+         (OLED, Lime), or Graphite with its blue for a copy saved before accents were a setting. -->
+    <script>
+      (function () {
+        var root = document.documentElement;
+        try {
+          var look = JSON.parse(localStorage.getItem("gym-tracker.look") || "null");
+          if (!look || typeof look !== "object") {
+            var old = JSON.parse(localStorage.getItem("gym-tracker.settings") || "null");
+            look = old && old.theme === "graphite" ? { theme: "graphite", accent: "blue", family: "dark", bg: "#121214" } : null;
+          }
+          if (!look) return;
+          if (typeof look.theme === "string") root.setAttribute("data-theme", look.theme);
+          if (typeof look.accent === "string") root.setAttribute("data-accent", look.accent);
+          if (look.family === "light" || look.family === "dark") {
+            root.setAttribute("data-family", look.family);
+            var scheme = document.querySelector('meta[name="color-scheme"]');
+            if (scheme) scheme.setAttribute("content", look.family);
+          }
+          var vars = look.vars && typeof look.vars === "object" ? look.vars : {};
+          for (var name in vars) {
+            if (/^--[a-z0-9-]+$/.test(name) && typeof vars[name] === "string") root.style.setProperty(name, vars[name]);
+          }
+          var bar = document.querySelector('meta[name="theme-color"]');
+          if (bar && typeof look.bg === "string") bar.setAttribute("content", look.bg);
+        } catch (e) {
+          /* storage blocked (private mode) or a damaged copy: the defaults */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
