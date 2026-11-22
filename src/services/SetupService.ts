@@ -129,7 +129,9 @@ export class SetupService {
   /**
    * Files logs that synced in for exercises merged or deleted on another device (saved there
    * before it heard): into the exercise they were merged into, or dropped with the exercise.
-   * Safe to run any time and as often as you like; returns how many sessions it fixed.
+   * Safe to run any time and as often as you like; returns how many sessions it fixed. Fixes are
+   * dated just after the copy they fixed (saveRepairs), so they never beat a newer edit of that
+   * session still on its way from another device.
    */
   async reconcile(): Promise<number> {
     const days = (await this.repos.days.all()).filter((d) => d.retiredExercises().length > 0);
@@ -150,7 +152,7 @@ export class SetupService {
         if (next !== session) fixed.push(SetupService.keepIfAny(next));
       }
     }
-    await this.repos.sessions.saveMany(fixed);
+    await this.repos.sessions.saveRepairs(fixed);
     return fixed.length;
   }
 

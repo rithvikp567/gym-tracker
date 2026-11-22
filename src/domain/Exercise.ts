@@ -24,6 +24,12 @@ export interface ExerciseData {
    */
   aliases?: string[];
   /**
+   * The name keys it took over by merging, in merge order. Where the sheet has rows under several
+   * of its names on one date, its own names' sets come first and then these, in this order, as
+   * merging combined them. Missing = no merge recorded (none, or merged before this was stored).
+   */
+  mergedKeys?: string[];
+  /**
    * Name keys whose numbers are in another unit than `unit`: an exercise merged in keeps the unit
    * it was logged in, and switching units with "keep those" pins the old unit on the names logged
    * so far. Re-importing the sheet reads each name's rows in its unit. Missing = all in `unit`.
@@ -86,6 +92,15 @@ export class Exercise {
     return this.data.keyUnits?.[key] ?? this.unit;
   }
 
+  /**
+   * Where sets filed under one of its name keys go on a date that has several of its names (a
+   * re-imported sheet): lower first. Its own names come before names it took over by merging, and
+   * those follow in merge order, so a re-import combines a day as the merge did, renamed or not.
+   */
+  rowOrder(key: string): number {
+    return Math.max(this.namesInOrder().indexOf(key), 0);
+  }
+
   /** "3×8", "3 sets", "8 reps", "45 min walk", or "". */
   targetLabel(): string {
     if (this.kind === "check") return this.targetText ?? "";
@@ -134,20 +149,27 @@ export class Exercise {
 
   /**
    * Takes over another exercise's names (merging it into this one): re-imported rows under them
-   * land here and are read in the unit `other` logged them in.
+   * land here, after this exercise's own (rowOrder), and are read in the unit `other` logged them in.
    */
   withNamesOf(other: Exercise): Exercise {
-    const keys = [other.key, ...other.aliases];
+    const keys = other.namesInOrder();
+    const taken = keys.filter((key) => !this.answersTo(key));
     const next = this.withAliases(keys);
     const keyUnits = { ...next.data.keyUnits };
     for (const key of keys) {
       if (key !== next.key) keyUnits[key] = other.unitOf(key);
     }
-    return next.withKeyUnits(keyUnits);
+    return new Exercise({ ...next.data, mergedKeys: [...(this.data.mergedKeys ?? []), ...taken] }).withKeyUnits(keyUnits);
   }
 
   toJSON(): ExerciseData {
     return { ...this.data };
+  }
+
+  /** Its name keys in rowOrder: its own (name, then old names), then those taken over by merging. */
+  private namesInOrder(): string[] {
+    const merged = this.data.mergedKeys ?? [];
+    return [...[this.key, ...this.aliases].filter((key) => !merged.includes(key)), ...merged];
   }
 
   /** Stores only the names whose unit differs from `unit` (the rest follow it). */

@@ -116,7 +116,8 @@ export class ExerciseLog {
   /**
    * Both logs as one (two merged exercises logged on the same day): this log's sets, then the
    * other's; Done if either was done, otherwise this log's answer unless unanswered; both notes,
-   * one per line. Logs in different units combine in pounds (plates convert exactly).
+   * one per line. Weights in two units combine in pounds (plates convert exactly); a log without
+   * weights (a note, bodyweight reps) has nothing to convert, so the other's stay in their unit.
    * `exerciseUnit` is the unit of a log saved without one.
    */
   mergedWith(other: ExerciseLog, exerciseUnit: LoadUnit = "lb"): ExerciseLog {
@@ -124,10 +125,11 @@ export class ExerciseLog {
     const done = this.done === true || other.done === true ? true : (this.done ?? other.done);
     const mine = this.unitOr(exerciseUnit);
     const theirs = other.unitOr(exerciseUnit);
-    if (mine === theirs) {
-      return new ExerciseLog(this.exerciseId, [...this.sets, ...other.sets], done, notes, this.unit ?? other.unit);
-    }
-    return new ExerciseLog(this.exerciseId, [...this.poundSets(mine), ...other.poundSets(theirs)], done, notes, "lb");
+    const combined = (sets: SetEntry[], unit: LoadUnit | undefined) => new ExerciseLog(this.exerciseId, sets, done, notes, unit);
+    if (mine === theirs) return combined([...this.sets, ...other.sets], this.unit ?? other.unit);
+    if (other.topWeight() === null) return combined([...this.sets, ...other.sets], this.unit);
+    if (this.topWeight() === null) return combined([...this.sets, ...other.sets], other.unit);
+    return combined([...this.poundSets(mine), ...other.poundSets(theirs)], "lb");
   }
 
   toJSON(): ExerciseLogData {

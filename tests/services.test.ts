@@ -207,6 +207,54 @@ describe("SetupService exercise management", () => {
     expect(after.allExercises().map((e) => e.name)).toEqual(["Leg Press (Plates)"]);
     // Both names logged on one date: both rows' sets, in the order the merge put them.
     expect(await summaries(day.id, press!.id)).toEqual(merged);
+
+    // Still after renaming what was kept, even to the merged-away name.
+    for (const name of ["Leg Press Machine", "Leg Press"]) {
+      await setup.updateDay(day.id, (x) => x.withExercise(x.exercise(press!.id)!.renamed(name)));
+      expect((await imports.apply(sheet)).exercisesCreated).toBe(0);
+      expect(await summaries(day.id, press!.id)).toEqual(merged);
+    }
+  });
+
+  it("takes TASKS.md §8's order: plates names merged and switched first, then the pounds one", async () => {
+    const imports = new ImportService(repos);
+    const plan = lowerSheet(
+      ["2026-03-03", [row("legpressplates", 2.5, 8)]],
+      ["2026-03-10", [row("legpressbusyplates", 3, 8), row("legpress", 300, 10)]],
+      ["2026-03-17", [row("legpress", 310, 10)]],
+    );
+    plan.days[0]!.exercises.push({ key: "legpressbusyplates", name: "Leg Press (Busy)(Plates)", kind: "strength", targetSets: null, targetText: null, active: false });
+    await imports.apply(plan);
+    const day = (await setup.days())[0]!;
+    const byName = (name: string) => day.allExercises().find((e) => e.name === name)!;
+    const [press, busy, oldPress] = [byName("Leg Press (Plates)"), byName("Leg Press (Busy)(Plates)"), byName("Legpress")];
+    // Both "(Plates)" names hold plate counts, so they can merge first and switch together...
+    await setup.mergeExercise(day.id, busy.id, press.id);
+    expect(await setup.sessionsLoggedIn(day.id, press.id, "lb")).toBe(2);
+    await setup.setUnit(day.id, press.id, "plates", "relabel");
+    // ...and only then take in the name logged in pounds.
+    await setup.mergeExercise(day.id, oldPress.id, press.id);
+    const expected = [["2026-03-03", 230, "2.5 pl"], ["2026-03-10", 300, "300"], ["2026-03-17", 310, "310"]];
+    const points = async () =>
+      (await new ProgressService(repos, clock).lines(day.id, "ALL")).lines[0]!.points.map((p) => [p.date.toString(), p.weight, p.label]);
+    expect(await points()).toEqual(expected);
+    expect(await summaries(day.id, press.id, "plates")).toEqual([["2026-03-03", "2.5 pl · 8"], ["2026-03-10", "270/300 · 8/10"], ["2026-03-17", "310 · 10"]]);
+    await imports.apply(plan);
+    expect(await points()).toEqual(expected);
+  });
+
+  it("keeps plates as plates when the merged name only has a note that day", async () => {
+    const { day, press, oldPress } = await lowerWithPress();
+    await setup.setUnit(day.id, press.id, "plates", "relabel");
+    await sessions.saveLog(day.id, d("2026-10-13"), ExerciseLog.empty(press.id).withSets(sets(2.5, 10, 10)));
+    await sessions.saveLog(day.id, d("2026-10-13"), ExerciseLog.empty(oldPress.id).withNote("sled taken").withUnit("lb"));
+    await sessions.saveLog(day.id, d("2026-10-20"), ExerciseLog.empty(oldPress.id).withNote("no time").withUnit("lb"));
+    await setup.mergeExercise(day.id, oldPress.id, press.id);
+    const history = await sessions.history(day.id);
+    expect(history.map((s) => [s.log(press.id)?.summary(" · ", "plates"), s.log(press.id)?.unitOr("plates")])).toEqual([
+      ["2.5 pl · 10/10", "plates"],
+      ["", "plates"], // a note alone: typed weights will be plates, like the rest
+    ]);
   });
 
   it("re-imports each name's rows in the unit it was logged in", async () => {
@@ -380,7 +428,10 @@ describe("Logs that sync in after a merge or delete", () => {
   }
   let now: number;
   const worldClock: Clock = { now: () => new Date(now) };
-  /** Stand-in for Supabase: keeps the newer copy of each record, like its trigger and SupabaseSync.apply. */
+  /**
+   * Stand-in for Supabase: an upload replaces the server's copy unless it is older (the keep_newest
+   * trigger), and a download replaces the device's copy only when it is newer (SupabaseSync.apply).
+   */
   let server: Map<string, { table: TableName; record: Syncable }>;
 
   beforeEach(() => {
@@ -400,7 +451,7 @@ describe("Logs that sync in after a merge or delete", () => {
     for (const entry of outbox) {
       const record = await store.get(entry.table, entry.id);
       const held = server.get(`${entry.table}/${entry.id}`);
-      if (record && (!held || Date.parse(record.updatedAt) > Date.parse(held.record.updatedAt))) {
+      if (record && (!held || Date.parse(record.updatedAt) >= Date.parse(held.record.updatedAt))) {
         server.set(`${entry.table}/${entry.id}`, { table: entry.table, record: structuredClone(record) });
       }
     }
@@ -482,6 +533,57 @@ describe("Logs that sync in after a merge or delete", () => {
     }
   });
 
+  it("never lets a repair made elsewhere beat edits made after the copy it repaired", async () => {
+    const { desktop, phone, day, exercises } = await lowerOnBoth("Leg Press", "Legpress", "Squat");
+    const [press, oldPress, squat] = exercises;
+    const date = d("2026-11-18");
+    // The desktop merges the old name away; at the gym the phone hasn't heard and logs it.
+    await desktop.setup.mergeExercise(day.id, oldPress!.id, press!.id);
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(oldPress!.id).withSets(sets(320, 10)));
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(squat!.id).withSets(sets(225, 5)));
+    await sync(desktop);
+    // A moment of signal: the phone uploads that copy, hears about the merge and files its log,
+    // then loses signal before the repair goes up and logs more sets (the app is suspended after).
+    await sync(phone);
+    expect(await phone.setup.reconcile()).toBe(1);
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(press!.id).withSets(sets(320, 10, 8)));
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(squat!.id).withSets(sets(225, 5, 5)));
+    // Hours later the desktop downloads the phone's first copy and repairs it too.
+    now += 2 * 3_600_000;
+    await sync(desktop);
+    expect(await desktop.setup.reconcile()).toBe(1);
+    await sync(desktop);
+    // When the phone is back, its later copy wins on both devices.
+    await sync(phone);
+    await sync(desktop);
+    for (const dev of [desktop, phone]) {
+      const session = await dev.sessions.find(day.id, date);
+      const summaries = new Map(session?.logs.map((l) => [l.exerciseId, l.summary()]));
+      expect(summaries).toEqual(new Map([[press!.id, "320 · 10/8"], [squat!.id, "225 · 5/5"]]));
+      expect(await dev.setup.reconcile()).toBe(0);
+    }
+  });
+
+  it("drops an open editor's last save for a merged-away exercise once its log was filed", async () => {
+    const { desktop, phone, day, exercises } = await lowerOnBoth("Leg Press", "Legpress");
+    const [press, oldPress] = exercises;
+    const date = d("2026-11-18");
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(oldPress!.id).withSets(sets(320, 10)));
+    await desktop.setup.mergeExercise(day.id, oldPress!.id, press!.id);
+    await sync(desktop);
+    await sync(phone); // the merge arrives while the phone's Legpress row is open
+    const logs = async () => (await phone.sessions.find(day.id, date))?.logs.map((l) => [l.exerciseId, l.summary()]);
+
+    // A save before the log is filed replaces it, and is filed once.
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(oldPress!.id).withSets(sets(320, 10, 8)));
+    expect(await phone.setup.reconcile()).toBe(1);
+    expect(await logs()).toEqual([[press!.id, "320 · 10/8"]]);
+    // The row is gone now; its editor flushes the draft it held as it closes. Nothing is filed twice.
+    await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(oldPress!.id).withSets(sets(320, 10, 8, 6)));
+    expect(await phone.setup.reconcile()).toBe(0);
+    expect(await logs()).toEqual([[press!.id, "320 · 10/8"]]);
+  });
+
   it("follows merges of merges and keeps a late log's unit", async () => {
     let day = await setup.createDay("Lower");
     day = (await setup.updateDay(day.id, (x) => x.addExercise("Sled").addExercise("Legpress").addExercise("Leg Press")))!;
@@ -510,9 +612,10 @@ describe("Logs that sync in after a merge or delete", () => {
     expect(await setup.reconcile()).toBe(0);
     expect(await store.outbox()).toEqual(before);
 
-    // Two merges pointing at each other (hand-made data): no safe answer, so the log stays.
+    // Two merges pointing at each other (hand-made data): no safe answer, so a log that syncs in stays.
     await repos.days.save(WorkoutDay.from({ ...day.toJSON(), retired: [{ id: "x", mergedInto: "y" }, { id: "y", mergedInto: "x" }] }));
-    await sessions.saveLog(day.id, d("2026-11-16"), ExerciseLog.empty("x").withSets(sets(100, 5)));
+    const late = (await sessions.find(day.id, d("2026-11-16")))!.withLog(ExerciseLog.empty("x").withSets(sets(100, 5)));
+    await store.putMany("sessions", [late.withUpdatedAt("2026-11-21T00:00:00.000Z").toJSON()], "remote");
     expect(await setup.reconcile()).toBe(0);
     expect((await sessions.find(day.id, d("2026-11-16")))?.log("x")?.summary()).toBe("100 · 5");
   });

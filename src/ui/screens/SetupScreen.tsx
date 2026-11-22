@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { Exercise, ExerciseKind, PastUnits } from "../../domain/Exercise";
 import { unitName, type LoadUnit } from "../../domain/Load";
 import { WEEKDAY_SHORT, type Weekday } from "../../domain/LocalDate";
@@ -150,10 +150,18 @@ function DayCard({
   const sessionsText = (n: number | undefined) => (n === undefined ? "its sessions" : `${n} session${n === 1 ? "" : "s"}`);
 
   const merge = (from: Exercise, into: Exercise) => {
+    const otherUnit: LoadUnit = into.unit === "plates" ? "lb" : "plates";
+    // Both logged in one unit: a later unit switch can't tell their numbers apart (a shared day is
+    // one log), so a name that was really in the other unit has to be switched before the merge.
+    const bothLogged = sessionsOf(from) !== 0 && sessionsOf(into) !== 0;
     const units =
-      from.kind === "strength" && from.unit !== into.unit
-        ? ` "${from.name}" is logged in ${unitName(from.unit)} and "${into.name}" in ${unitName(into.unit)}: each session keeps its unit, and a day logged under both is combined in pounds.`
-        : "";
+      from.kind !== "strength"
+        ? ""
+        : from.unit !== into.unit
+          ? ` "${from.name}" is logged in ${unitName(from.unit)} and "${into.name}" in ${unitName(into.unit)}: each session keeps its unit, and a day with weights under both is combined in pounds.`
+          : bothLogged
+            ? ` Both are logged in ${unitName(into.unit)}. If only one of them was really logged in ${unitName(otherUnit)}, cancel and switch that one first (⋮ → Log in ${unitName(otherUnit)}): after merging, their numbers can't be told apart.`
+            : "";
     const ok = confirm(
       `Merge "${from.name}" into "${into.name}"? Everything logged in ${sessionsText(sessionsOf(from))} moves over and "${from.name}" goes away. This can't be undone.${units}`,
     );
@@ -334,6 +342,17 @@ function ExerciseFields({
   /** While asking what earlier sessions are before a unit switch: how many there are. */
   const [unitAsk, setUnitAsk] = useState<number | null>(null);
   const askId = useId();
+  const unitChip = useRef<HTMLButtonElement>(null);
+  const asked = useRef(false);
+  // Answering the unit question (or Cancel) removes the focused button: focus goes back to the
+  // unit chip, where the one-tap switch leaves it. Closing the whole menu leaves it on ⋮.
+  useEffect(() => {
+    if (unitAsk !== null) asked.current = true;
+    else if (asked.current) {
+      asked.current = false;
+      unitChip.current?.focus();
+    }
+  }, [unitAsk]);
   const isCheck = exercise.kind === "check";
   const archived = exercise.archived;
   const nextUnit: LoadUnit = exercise.unit === "plates" ? "lb" : "plates";
@@ -448,7 +467,7 @@ function ExerciseFields({
             </button>
           )}
           {!isCheck && (
-            <button type="button" className="chip-btn" onClick={() => void switchUnit()}>
+            <button ref={unitChip} type="button" className="chip-btn" onClick={() => void switchUnit()}>
               {exercise.unit === "plates" ? "Log in pounds" : "Log in plates"}
             </button>
           )}

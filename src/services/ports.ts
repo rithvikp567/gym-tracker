@@ -25,6 +25,12 @@ export interface SessionRepository {
   onDate(date: LocalDate): Promise<Session[]>;
   save(session: Session): Promise<Session>;
   saveMany(sessions: Session[]): Promise<void>;
+  /**
+   * Saves corrections to stored sessions (SetupService.reconcile) dated 1 ms after the copy each
+   * was made from, not now: an edit made on any device after that copy still wins in sync, and
+   * two devices correcting the same copy save the same record.
+   */
+  saveRepairs(sessions: Session[]): Promise<void>;
 }
 
 export interface SplitRepository {

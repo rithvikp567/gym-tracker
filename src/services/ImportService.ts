@@ -51,8 +51,9 @@ export class ImportService {
       dayIdByName.set(imported.name, day.id);
 
       // Rows that land on one exercise on one date (an exercise and one merged into it) combine
-      // into one log: its own name's rows first, then merged names in the order they were merged,
-      // as SetupService.mergeExercise combines them. Each row is read in its name's unit.
+      // into one log: its own names' rows first, then merged names in the order they were merged
+      // (Exercise.rowOrder), as SetupService.mergeExercise combines them. Each row is read in its
+      // name's unit.
       const rowsByDate = new Map<string, { exercise: Exercise; row: ImportedLog }[]>();
       for (const s of imported.sessions) {
         const rows = rowsByDate.get(s.date) ?? [];
@@ -64,7 +65,7 @@ export class ImportService {
       }
       for (const [date, rows] of rowsByDate) {
         let session = Session.start(day.id, LocalDate.parse(date));
-        for (const { exercise, row } of rows.sort((a, b) => nameRank(a) - nameRank(b))) {
+        for (const { exercise, row } of rows.sort((a, b) => a.exercise.rowOrder(a.row.key) - b.exercise.rowOrder(b.row.key))) {
           const unit = exercise.unitOf(row.key);
           const incoming = ExerciseLog.from({ exerciseId: exercise.id, sets: row.sets, done: row.done, note: row.note }).withUnit(
             unit === exercise.unit ? undefined : unit,
@@ -91,9 +92,4 @@ export class ImportService {
 
     return { daysCreated, exercisesCreated, sessionsWritten: sessions.length };
   }
-}
-
-/** A row under the exercise's own name sorts first, then rows under merged names in merge order. */
-function nameRank({ exercise, row }: { exercise: Exercise; row: ImportedLog }): number {
-  return row.key === exercise.key ? -1 : exercise.aliases.indexOf(row.key);
 }

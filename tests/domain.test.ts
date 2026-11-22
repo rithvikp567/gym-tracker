@@ -155,6 +155,17 @@ describe("ExerciseLog", () => {
     expect(legacy.mergedWith(log([[3, 8]]), "plates").unit).toBeUndefined(); // same unit: nothing to convert
   });
 
+  it("converts nothing when one side has no weights", () => {
+    const plates = log([[2.5, 10], [2.5, 10]]).withUnit("plates");
+    const note = ExerciseLog.empty("y").withNote("sled taken").withUnit("lb");
+    const bodyweight = ExerciseLog.empty("y").withSets([new SetEntry(null, 12)]).withUnit("lb");
+    expect(plates.mergedWith(note).summary()).toBe("2.5 pl · 10/10");
+    expect(plates.mergedWith(bodyweight).summary()).toBe("2.5/2.5/BW pl · 10/10/12");
+    expect(note.mergedWith(plates)).toMatchObject({ unit: "plates", note: "sled taken" });
+    // A log saved without a unit still follows the exercise.
+    expect(log([[2.5, 10]]).mergedWith(note, "plates").unit).toBeUndefined();
+  });
+
   it("uses the heaviest set for progress", () => {
     expect(log([[185, 10], [210, 10]]).topWeight()).toBe(210);
     expect(log([[null, 12]]).topWeight()).toBeNull();
@@ -227,6 +238,10 @@ describe("Merging and removing exercises", () => {
     const combined = both.mergeLogs("old", "new", { from: "lb", into: "plates" }).log("new")!;
     expect(combined.unit).toBe("lb");
     expect(combined.summary()).toBe("230/300 · 8/10");
+
+    // A log without weights has no unit to keep: it follows the exercise it moves to.
+    const note = Session.start("day", date).withLog(ExerciseLog.empty("old").withNote("sled taken").withUnit("lb"));
+    expect(note.mergeLogs("old", "new", { from: "lb", into: "plates" }).log("new")?.unit).toBeUndefined();
   });
 
   it("remembers merged and deleted exercises apart from the list", () => {
@@ -240,6 +255,7 @@ describe("Merging and removing exercises", () => {
     expect(day.retiredFate(hack!.id)).toEqual({ kind: "drop" });
     expect(day.retiredFate(squat!.id)).toBeUndefined(); // still on the day
     expect(day.retiredFate("never-heard-of-it")).toBeUndefined();
+    expect([oldPress, hack, squat].map((e) => day.isRetired(e!.id))).toEqual([true, true, false]);
     // Survives storage, and a stale edit can't bring a merged exercise back.
     expect(WorkoutDay.from(day.toJSON()).retiredExercises()).toEqual(day.retiredExercises());
     expect(day.withExercise(oldPress!.with({ targetSets: 3 }))).toBe(day);
@@ -272,6 +288,22 @@ describe("Merging and removing exercises", () => {
     expect(merged.unitOf("legpressmachine")).toBe("lb");
     expect(merged.unitOf(merged.key)).toBe("plates");
     expect(Exercise.from(merged.toJSON()).unitOf("legpress")).toBe("lb");
+  });
+
+  it("orders a merged exercise's sheet names as the merge combined them, through renames", () => {
+    const order = (ex: Exercise, keys: string[]) => [...keys].sort((a, b) => ex.rowOrder(a) - ex.rowOrder(b));
+    const merged = Exercise.create("Leg Press (Plates)").withNamesOf(Exercise.create("Legpress"));
+    const keys = ["legpress", "legpressplates"];
+    expect(order(merged, keys)).toEqual(["legpressplates", "legpress"]);
+    expect(order(merged.renamed("Leg Press Machine"), keys)).toEqual(["legpressplates", "legpress"]);
+    expect(order(merged.renamed("Leg Press"), keys)).toEqual(["legpressplates", "legpress"]); // now the merged name
+    expect(order(Exercise.from(merged.renamed("Leg Press").toJSON()), keys)).toEqual(["legpressplates", "legpress"]);
+    // Merges of merges: what was kept, then what it took in, then what that had taken in.
+    const chain = Exercise.create("A").withNamesOf(Exercise.create("B").withNamesOf(Exercise.create("C")));
+    expect(order(chain, ["c", "b", "a"])).toEqual(["a", "b", "c"]);
+    // Merged before the order was stored: its own name, then the others as added.
+    const older = Exercise.from({ ...Exercise.create("Leg Press (Plates)").toJSON(), aliases: ["legpress"] });
+    expect(order(older, keys)).toEqual(["legpressplates", "legpress"]);
   });
 });
 

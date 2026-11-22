@@ -72,6 +72,11 @@ export class WorkoutDay {
     return this.data.retired ?? [];
   }
 
+  /** True for an exercise merged away or deleted from this day. */
+  isRetired(id: string): boolean {
+    return this.retiredExercises().some((r) => r.id === id);
+  }
+
   /**
    * For a log on an exercise that was merged or deleted (and isn't on the day): the exercise it
    * belongs to now, following merges of merges (A → B → C), with the unit of a log saved without
@@ -121,7 +126,7 @@ export class WorkoutDay {
    */
   withExercise(exercise: Exercise): WorkoutDay {
     const i = this.list.findIndex((e) => e.id === exercise.id);
-    if (i < 0 && this.retiredExercises().some((r) => r.id === exercise.id)) return this;
+    if (i < 0 && this.isRetired(exercise.id)) return this;
     const list = [...this.list];
     if (i >= 0) list[i] = exercise;
     else list.push(exercise);
