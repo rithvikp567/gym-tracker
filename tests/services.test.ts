@@ -626,6 +626,60 @@ describe("Logs that sync in after a merge or delete", () => {
     }
   });
 
+  it("keeps \"those were plates\" when a device that hadn't heard of it edits the day", async () => {
+    const { desktop, phone, day, exercises } = await lowerOnBoth("Leg press", "Calf");
+    const [press] = exercises;
+    // An imported 3 × 10 (saved without a unit) and one logged in the app in pounds.
+    await desktop.sessions.saveLog(day.id, d("2026-11-03"), ExerciseLog.empty(press!.id).withSets(sets(3, 10)));
+    await desktop.sessions.saveLog(day.id, d("2026-11-10"), ExerciseLog.empty(press!.id).withSets(sets(3, 10)).withUnit("lb"));
+    await sync(desktop);
+    await sync(phone);
+    await desktop.setup.setUnit(day.id, press!.id, "plates", "relabel");
+    await sync(desktop);
+    // The phone, not synced since, edits the day: its copy of the day goes up again, still in pounds.
+    await phone.setup.updateDay(day.id, (x) => x.addExercise("Hack squat"));
+    await sync(phone);
+    await sync(desktop);
+    for (const dev of [desktop, phone]) {
+      const line = (await new ProgressService(dev.repos, clock).lines(day.id, "ALL")).lines.find((l) => l.exercise.id === press!.id);
+      expect(line!.points.map((p) => [p.date.toString(), p.weight, p.label])).toEqual([
+        ["2026-11-03", 270, "3 pl"],
+        ["2026-11-10", 270, "3 pl"],
+      ]);
+    }
+  });
+
+  for (const done of [true, false]) {
+    it(`never loses a late ${done ? "Done" : "Skipped"} to a drop repair when the merge won`, async () => {
+      const [desktop, phone, laptop] = [device(), device(), device()];
+      let day = await desktop.setup.createDay("Abs");
+      day = (await desktop.setup.updateDay(day.id, (x) => x.addExercise("Crunch").addExercise("Cardio treadmill", "check").addExercise("Cardio walk", "check")))!;
+      for (const dev of [desktop, phone, laptop]) await sync(dev);
+      const [crunch, treadmill, walk] = day.allExercises();
+      const date = d("2026-11-18");
+      await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(crunch!.id).withSets(sets(20, 8)));
+      await phone.sessions.saveLog(day.id, date, ExerciseLog.empty(walk!.id).withDone(done));
+      await sync(phone);
+      // Both offline: the desktop deletes Walk, then the laptop merges it into Treadmill (the later day edit).
+      await desktop.setup.deleteExercise(day.id, walk!.id);
+      now += 60_000;
+      await laptop.setup.mergeExercise(day.id, walk!.id, treadmill!.id);
+      await sync(desktop);
+      expect(await desktop.setup.reconcile()).toBe(1);
+      await sync(laptop);
+      expect(await laptop.setup.reconcile()).toBe(1);
+      for (const dev of [laptop, desktop, phone, laptop, desktop, phone]) {
+        await sync(dev);
+        await dev.setup.reconcile();
+      }
+      for (const dev of [laptop, desktop, phone]) {
+        const logs = (await dev.sessions.find(day.id, date))?.logs.map((l) => [l.exerciseId, l.summary()]);
+        expect(logs).toEqual([[crunch!.id, "20 · 8"], [treadmill!.id, done ? "Done" : "Skipped"]]);
+        expect(await dev.store.outbox()).toEqual([]);
+      }
+    });
+  }
+
   it("never writes a repair over a save that landed while it ran", async () => {
     /** Runs `during` once, after reading the sessions and before answering (a save landing mid-read). */
     class SaveDuringRead extends MemoryRecordStore {

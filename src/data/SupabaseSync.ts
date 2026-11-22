@@ -294,8 +294,9 @@ export class SupabaseSync implements SyncController {
     }
     if (taken.length) await this.store.putMany(table, taken, "remote");
     if (again.length) {
-      await this.store.putMany(table, again, "local"); // queued with the same stamp
-      this.again = true;
+      // Queued again with the same stamp, unless a save landed meanwhile: that one is newer and goes up anyway.
+      const queued = await this.store.putIfUnchanged(table, again.map((record) => ({ record, basedOn: record.updatedAt })));
+      if (queued.length) this.again = true;
     }
     return taken.length > 0;
   }

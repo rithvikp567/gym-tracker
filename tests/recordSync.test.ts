@@ -64,6 +64,11 @@ describe("outranks", () => {
     // A deleted copy (its last log dropped) loses to any kept one.
     expect(outranks(copy(T1, [], { deleted: true }), copy(T1, []))).toBe(false);
     expect(outranks(copy(T1, []), copy(T1, filed, { deleted: true }))).toBe(true);
+    // Done / skipped answers count like sets: filing a late check beats dropping it.
+    const squat = log("squat", [set(225, 5)]);
+    const answered = (done: boolean) => ({ exerciseId: "treadmill", sets: [], done, note: "" });
+    expect(outranks(copy(T1, [squat, answered(true)]), copy(T1, [squat]))).toBe(true);
+    expect(outranks(copy(T1, [squat]), copy(T1, [squat, answered(false)]))).toBe(false);
     // Same sets: the longer notes win (both notes kept beat one).
     const withNotes = [log("press", [set(300, 10)], "seat 4\nsled first")];
     const oneNote = [log("press", [set(300, 10)], "seat 4")];

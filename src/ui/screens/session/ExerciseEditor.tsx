@@ -32,7 +32,7 @@ function parse(value: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** `unit`: what the weights were typed in, saved with them (none for done / not-done exercises). */
+/** `unit`: what the weights were typed in, saved with them (dropped when there are none). */
 function toLog(exerciseId: string, draft: Draft, unit: LoadUnit | undefined): ExerciseLog {
   const sets = draft.sets.map((s) => new SetEntry(parse(s.weight), parse(s.reps))).filter((s) => !s.isEmpty());
   return ExerciseLog.empty(exerciseId).withSets(sets).withDone(draft.done).withNote(draft.note).withUnit(unit);
@@ -69,7 +69,9 @@ export function ExerciseEditor({
 
   const update = (next: Draft) => {
     setDraft(next);
-    save(toLog(exercise.id, next, exercise.kind === "check" ? undefined : unit));
+    // Done / not done saves the unit too: a day logged as weight × reps keeps its weights when the
+    // exercise is switched over (a log without weights never keeps a unit, see ExerciseLog).
+    save(toLog(exercise.id, next, unit));
   };
 
   const setWeight = (i: number, value: string) => {

@@ -27,13 +27,14 @@ export function settle(remote: Syncable, local: Syncable | undefined, waitingToU
 
 /**
  * Between two different copies with one stamp, whether `a` is the one to keep. Loss-averse first:
- * the copy holding more logged sets wins (a repair that filed a late log beats one that dropped
- * it, and a deleted copy loses to a kept one), then the one with more note text; then a fixed
- * order of the contents, so any two copies compare the same way on every device.
+ * the copy holding more logged sets and done / skipped answers wins (a repair that filed a late
+ * log beats one that dropped it, and a deleted copy loses to a kept one), then the one with more
+ * note text; then a fixed order of the contents, so any two copies compare the same way on every
+ * device.
  */
 export function outranks(a: Syncable, b: Syncable): boolean {
   const [ka, kb] = [held(a), held(b)];
-  if (ka.sets !== kb.sets) return ka.sets > kb.sets;
+  if (ka.entries !== kb.entries) return ka.entries > kb.entries;
   if (ka.notes !== kb.notes) return ka.notes > kb.notes;
   return comparable(a) > comparable(b);
 }
@@ -43,21 +44,25 @@ export function sameContent(a: Syncable, b: Syncable): boolean {
   return comparable(a) === comparable(b);
 }
 
-/** Filled sets and note characters across a session copy's logs; -1 sets for a deleted copy; 0 for other records. */
-function held(record: Syncable): { sets: number; notes: number } {
-  if (record.deleted === true) return { sets: -1, notes: 0 };
+/**
+ * What a session copy holds: filled sets plus answered done / not-done checks (`entries`), and
+ * note characters; -1 entries for a deleted copy; nothing for other records.
+ */
+function held(record: Syncable): { entries: number; notes: number } {
+  if (record.deleted === true) return { entries: -1, notes: 0 };
   const logs = (record as { logs?: unknown }).logs;
-  let sets = 0;
+  let entries = 0;
   let notes = 0;
   if (Array.isArray(logs)) {
-    for (const log of logs as { sets?: unknown; note?: unknown }[]) {
+    for (const log of logs as { sets?: unknown; done?: unknown; note?: unknown }[]) {
       if (Array.isArray(log?.sets)) {
-        sets += (log.sets as { weight?: unknown; reps?: unknown }[]).filter((s) => (s?.weight ?? null) !== null || (s?.reps ?? null) !== null).length;
+        entries += (log.sets as { weight?: unknown; reps?: unknown }[]).filter((s) => (s?.weight ?? null) !== null || (s?.reps ?? null) !== null).length;
       }
+      if (log?.done === true || log?.done === false) entries += 1;
       if (typeof log?.note === "string") notes += log.note.trim().length;
     }
   }
-  return { sets, notes };
+  return { entries, notes };
 }
 
 /** The record as canonical JSON without its stamp: keys sorted, missing and undefined alike. */

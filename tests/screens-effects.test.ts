@@ -507,6 +507,19 @@ describe("ExerciseEditor units, mounted", () => {
     expect([saved.unit, saved.topWeight(), saved.note]).toEqual(["plates", 2.5, "seat 4"]);
   });
 
+  it("keeps a day's weights in their unit when the exercise is now done / not done", async () => {
+    const press = Exercise.create("Leg press").withUnit("plates", "keep").with({ kind: "check" }); // unmarked logs: pounds
+    const onSave = vi.fn();
+    const log = ExerciseLog.empty(press.id).withSets([new SetEntry(2.5, 10)]).withUnit("plates");
+    const host = mount(createElement(ExerciseEditor, { exercise: press, log, last: undefined, onSave }));
+    const [done] = findAll(host, (el) => el.tagName === "BUTTON" && el.textContent.includes("Done"));
+    const props = Object.entries(done!).find(([k]) => k.startsWith("__reactProps$"))![1] as { onClick: () => void };
+    act(() => props.onClick());
+    await settle(450);
+    const saved = lastSaved(onSave);
+    expect([saved.done, saved.unit, saved.topWeight()]).toEqual([true, "plates", 2.5]);
+  });
+
   it("keeps the unit it opened in when a weight is cleared mid-edit", async () => {
     const press = platesPress();
     const onSave = vi.fn();

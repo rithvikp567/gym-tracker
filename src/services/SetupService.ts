@@ -83,10 +83,12 @@ export class SetupService {
   /**
    * Logs an exercise in `unit` from now on. `past` says what its weights saved in the old unit
    * are: "keep" leaves them in the old unit, "relabel" says they were in the new unit all along
-   * (also fixes an earlier wrong choice). Nothing is converted. Logs saved without a unit and
-   * re-imported sheet rows follow the choice through the exercise (Exercise.withUnit), which a
-   * session saved on a device that hasn't heard of the switch can't undo; "relabel" also relabels
-   * the logs saved with the old unit.
+   * (also fixes an earlier wrong choice). Nothing is converted. The choice is kept where a stale
+   * copy can't undo it alone: "keep" on the exercise only (logs saved without a unit read in its
+   * `bareUnit`, so a session re-saved by a device that hasn't heard of the switch still reads
+   * right), "relabel" on the exercise and on every weighted log that read in the old unit (so a
+   * stale copy of either the day or a session still reads right). Re-imported sheet rows follow
+   * through the exercise (Exercise.withUnit).
    */
   async setUnit(dayId: string, exerciseId: string, unit: LoadUnit, past: PastUnits): Promise<void> {
     const day = await this.repos.days.get(dayId);
@@ -98,7 +100,7 @@ export class SetupService {
         ? []
         : (await this.repos.sessions.forWorkoutDay(dayId)).flatMap((s) => {
             const log = s.log(exerciseId);
-            return log?.unit === old ? [s.withLog(log.withUnit(unit))] : [];
+            return log && log.topWeight() !== null && log.unitOr(exercise.bareUnit) === old ? [s.withLog(log.withUnit(unit))] : [];
           });
     await this.repos.sessions.saveMany(relabeled);
     await this.repos.days.save(day.withExercise(exercise.withUnit(unit, past)));
