@@ -1,7 +1,8 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect } from "react";
 import type { AppServices } from "../app/AppServices";
-import { useRoute, type Route } from "./router";
+import { applyPendingScroll, useRoute, type Route } from "./router";
 import { CalendarScreen } from "./screens/CalendarScreen";
+import { DayScreen } from "./screens/DayScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { ImportScreen } from "./screens/ImportScreen";
 
@@ -18,7 +19,10 @@ function Screen({ route }: { route: Route }) {
     case "home":
       return <HomeScreen />;
     case "session":
-      return <SessionScreen key={route.dayId} dayId={route.dayId} date={route.date} />;
+      // A fresh screen per workout + date: open rows and notes start closed, and it slides in.
+      return <SessionScreen key={`${route.dayId}/${route.date}`} dayId={route.dayId} date={route.date} />;
+    case "day":
+      return <DayScreen key={route.date} date={route.date} />;
     case "calendar":
       return <CalendarScreen year={route.year} />;
     case "progress":
@@ -28,7 +32,7 @@ function Screen({ route }: { route: Route }) {
         </Suspense>
       );
     case "setup":
-      return <SetupScreen />;
+      return <SetupScreen key={route.dayId ?? ""} openDayId={route.dayId} />;
     case "settings":
       return <SettingsScreen />;
     case "import":
@@ -49,6 +53,8 @@ function ThemeSync() {
 
 export function App({ services }: { services: AppServices }) {
   const route = useRoute();
+  // After each navigation: top of the page, or where you were when going back.
+  useLayoutEffect(applyPendingScroll, [route]);
   return (
     <ServicesProvider services={services}>
       <ThemeSync />

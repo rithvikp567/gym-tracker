@@ -49,6 +49,23 @@ export class IndexedDbRecordStore implements RecordStore {
     await tx.done;
   }
 
+  async putIfUnchanged<T extends Syncable>(table: TableName, records: { record: T; basedOn: string }[]): Promise<string[]> {
+    const tx = this.db.transaction([table, OUTBOX], "readwrite");
+    const data = tx.objectStore(table);
+    const outbox = tx.objectStore(OUTBOX);
+    const saved: string[] = [];
+    for (const { record, basedOn } of records) {
+      const current = (await data.get(record.id)) as Syncable | undefined;
+      if (current?.updatedAt !== basedOn) continue;
+      void data.put(record);
+      const entry: OutboxEntry = { key: outboxKey(table, record.id), table, id: record.id, updatedAt: record.updatedAt };
+      void outbox.put(entry);
+      saved.push(record.id);
+    }
+    await tx.done;
+    return saved;
+  }
+
   async outbox(): Promise<OutboxEntry[]> {
     return (await this.db.getAll(OUTBOX)) as OutboxEntry[];
   }

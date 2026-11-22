@@ -23,6 +23,9 @@ export class NoSync implements SyncController {
     throw new Error("Sync isn't set up for this site yet.");
   }
 
+  /** Nothing to sync with: preferences stay on this device. */
+  attachPreferences(): void {}
+
   async signOut(): Promise<void> {}
   async syncNow(): Promise<void> {}
   requestSync(): void {}

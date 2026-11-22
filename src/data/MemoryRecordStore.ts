@@ -26,6 +26,17 @@ export class MemoryRecordStore implements RecordStore {
     }
   }
 
+  async putIfUnchanged<T extends Syncable>(table: TableName, records: { record: T; basedOn: string }[]): Promise<string[]> {
+    // No await between the check and the write, so nothing can land in between.
+    const fresh = records.filter(({ record, basedOn }) => this.table(table).get(record.id)?.updatedAt === basedOn);
+    for (const { record } of fresh) {
+      this.table(table).set(record.id, structuredClone(record));
+      const key = outboxKey(table, record.id);
+      this.queue.set(key, { key, table, id: record.id, updatedAt: record.updatedAt });
+    }
+    return fresh.map(({ record }) => record.id);
+  }
+
   async outbox(): Promise<OutboxEntry[]> {
     return [...this.queue.values()];
   }

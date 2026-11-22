@@ -5,10 +5,33 @@
 }
 
 .shell-main {
-  padding: calc(env(safe-area-inset-top) + 14px) calc(var(--gutter) + env(safe-area-inset-right))
-    calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 28px) calc(var(--gutter) + env(safe-area-inset-left));
+  --main-pad-top: calc(env(safe-area-inset-top) + 14px);
+  --main-pad-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 28px);
+  padding: var(--main-pad-top) calc(var(--gutter) + env(safe-area-inset-right)) var(--main-pad-bottom)
+    calc(var(--gutter) + env(safe-area-inset-left));
   max-width: 720px;
   margin: 0 auto;
+}
+
+/* A page as tall as the visible area, so a CenterBlock at its end can center in what's left. */
+.page-fill {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - var(--main-pad-top) - var(--main-pad-bottom));
+}
+
+/* The part of a screen below its header, centered vertically in the space that's left. */
+.center-block {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
+}
+
+/* Held (a row is open): stays where it was and grows downward instead of re-centering. */
+.center-block.is-held {
+  justify-content: flex-start;
 }
 
 .tabbar {
@@ -98,9 +121,11 @@
   }
 
   .shell-main {
+    --main-pad-top: 36px;
+    --main-pad-bottom: 64px;
     max-width: 1080px;
     width: 100%;
-    padding: 36px 40px 64px;
+    padding: var(--main-pad-top) 40px var(--main-pad-bottom);
   }
 }
 
@@ -517,8 +542,13 @@ a.list-row:hover {
   padding: 0 2px;
 }
 
+/* A grid, so the dot is centered in its slot instead of sitting on the text baseline (which
+   pushed it down onto the bottom edge of the picked day). */
 .week-day .dot-slot {
+  display: grid;
+  place-items: center;
   height: 7px;
+  margin-top: 1px;
 }
 
 .week-day.today .dn {
@@ -535,13 +565,57 @@ a.list-row:hover {
   color: var(--accent);
 }
 
+/* "Dec 28, 2026 – Jan 3, 2027" and "| Week 53" never break inside: if the line can't fit
+   beside the arrows and the Today link on a phone, only the week number moves down. */
+.home-head .sub > span {
+  white-space: nowrap;
+}
+
+.home-head-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* Sync is set up but has nothing to say yet: keep the chip's space so the header doesn't grow when it appears. */
+.home-head-side .chip.is-placeholder {
+  visibility: hidden;
+}
+
+/* Rows still showing the last week on screen while the picked one loads: aria-busy at once,
+   data-stale (set by WorkoutRows after 150 ms) dims them, so fast loads never flicker. Not an
+   animation: Reduce Motion turns those off, and only the fade should go then, not the dimming. */
+.home .list[data-stale] {
+  opacity: 0.45;
+  transition: opacity 0.2s ease-out;
+}
+
+.week-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: -8px;
+}
+
+.week-nav .link {
+  margin-right: 6px;
+}
+
 /* ───────────── Session ───────────── */
 
-.session-screen.slide-back {
+/* Everything below a workout screen's header; it fills the page so CenterBlock can center. */
+.slide-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.slide-body.slide-back {
   animation: slide-back 0.22s ease-out;
 }
 
-.session-screen.slide-forward {
+.slide-body.slide-forward {
   animation: slide-forward 0.22s ease-out;
 }
 
@@ -555,17 +629,99 @@ a.list-row:hover {
 
 .session-head {
   display: grid;
-  grid-template-columns: 36px 1fr auto;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "back name jumps"
+    ".    sub  sub";
   align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
+  column-gap: 8px;
+  row-gap: 2px;
+  margin-bottom: 16px;
 }
 
-.session-title {
+.session-head > .icon-btn {
+  grid-area: back;
+}
+
+.session-name {
+  grid-area: name;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-jumps {
+  grid-area: jumps;
   display: flex;
-  align-items: baseline;
+  gap: 6px;
+  justify-self: end;
+}
+
+.jump-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 99px;
+  border: 0.5px solid var(--hairline-strong);
+  font-size: 13px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.jump-btn:hover:not(:disabled) {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.jump-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* "Last session" on roomy screens, "Last" on narrow phones. */
+.wide-only {
+  display: none;
+}
+
+@media (min-width: 440px) {
+  .wide-only {
+    display: inline;
+  }
+}
+
+/* Second line: the date (tap to change it) on the left, the day arrows on the right. */
+.session-sub {
+  grid-area: sub;
+  display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-width: 0;
+}
+
+.session-sub .date-picker {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.day-arrows {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  margin-right: -6px;
+}
+
+.session-foot {
+  margin-top: 28px;
+  text-align: center;
+}
+
+/* Nothing logged yet: the footer keeps its space, so the centered list doesn't jump when it appears. */
+.session-foot.is-hidden {
+  visibility: hidden;
 }
 
 .date-picker {
@@ -583,15 +739,6 @@ a.list-row:hover {
   opacity: 0;
   width: 100%;
   cursor: pointer;
-}
-
-.swipe-hint {
-  font-size: 11px;
-  color: var(--text-3);
-  margin: 2px 0 16px 44px;
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
 }
 
 .past-banner {
@@ -780,13 +927,15 @@ a.list-row:hover {
   color: var(--good);
 }
 
-@media (min-width: 900px) {
-  .swipe-hint .hint-text {
-    visibility: hidden;
-  }
+.plates-hint {
+  font-size: 12px;
+  color: var(--text-3);
+  margin: -2px 0 0;
+}
 
-  /* Desktop table: Exercise | Weight | Reps | Last time | Target. Data columns are centered
-     in equal-share tracks so the gaps between them look the same. */
+@media (min-width: 900px) {
+  /* Desktop table: Exercise | Weight | Reps | Last time | Target. Every column, the exercise
+     names included, is centered in its track; the tracks share the width so gaps look even. */
   .ex-head,
   .ex-row {
     grid-template-columns: minmax(170px, 1.6fr) repeat(2, minmax(80px, 1fr)) minmax(120px, 1.3fr) minmax(80px, 1fr);
@@ -803,13 +952,20 @@ a.list-row:hover {
     border-bottom: 0.5px solid var(--hairline);
   }
 
-  .ex-head span:not(:first-child),
+  .ex-head span,
   .ex-weight,
   .ex-reps,
   .ex-last,
   .ex-target {
     justify-self: center;
     text-align: center;
+  }
+
+  .ex-name {
+    justify-self: center;
+    justify-content: center;
+    text-align: center;
+    max-width: 100%;
   }
 
   .ex-meta {
@@ -837,8 +993,20 @@ a.list-row:hover {
     font-size: 15px;
   }
 
-  .ex-editor {
-    max-width: 560px;
+  /* The open row's sets, buttons, and note sit centered under the row. */
+  .ex-editor,
+  .ex-note-view {
+    justify-self: center;
+    width: min(560px, 100%);
+  }
+
+  .editor-actions,
+  .done-toggle {
+    justify-content: center;
+  }
+
+  .plates-hint {
+    text-align: center;
   }
 }
 
@@ -1144,6 +1312,87 @@ details > summary {
   border-top: 0.5px solid var(--hairline);
 }
 
+.ex-edit-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ex-edit-name .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.unit-badge {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-3);
+  border: 0.5px solid var(--hairline-strong);
+  border-radius: 99px;
+  padding: 1px 7px;
+}
+
+.ex-edit-count {
+  font-size: 13px;
+  color: var(--text-3);
+  padding-right: 4px;
+}
+
+.ex-edit.is-archived .field.quiet {
+  color: var(--text-2);
+}
+
+.removed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.removed-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 0;
+  font-size: 14px;
+  color: var(--text-2);
+  border-top: 0.5px solid var(--hairline);
+}
+
+.removed-toggle .caret {
+  display: inline-grid;
+  color: var(--text-3);
+  transition: transform 0.2s ease;
+}
+
+.removed-toggle[aria-expanded="true"] .caret {
+  transform: rotate(180deg);
+}
+
+/* A chip that opens a native list (the select covers it, invisible). */
+.merge-pick {
+  position: relative;
+  cursor: pointer;
+}
+
+.merge-pick select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* Switching units with sessions logged: the question takes the menu's first line, chips answer it. */
+.unit-ask {
+  flex-basis: 100%;
+  margin: 0 0 2px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+
 /* Name reads as plain text until you tap it. */
 .field.quiet {
   background: transparent;
@@ -1309,9 +1558,41 @@ form.add-row {
   min-width: 0;
 }
 
+.setting .text > * {
+  display: block;
+}
+
 .setting .text .desc {
   font-size: 13px;
   color: var(--text-2);
+  margin-top: 2px;
+}
+
+.setting .text .desc.faint {
+  color: var(--text-3);
+}
+
+.import-options {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.year-field {
+  width: 88px;
+  flex: none;
+  text-align: center;
+}
+
+/* Import: a workout's details, with its weekday buttons beside them on wide screens and on
+   their own line on phones (they used to squeeze the text into a one-word column). */
+.import-day {
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+
+.import-day .grow {
+  flex: 1 1 220px;
 }
 
 .theme-swatch {

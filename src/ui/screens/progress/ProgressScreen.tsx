@@ -1,10 +1,9 @@
 import { useEffect, useMemo } from "react";
-import { formatNumber } from "../../../domain/SetEntry";
 import { RANGES, type ProgressLine, type RangeKey } from "../../../services/ProgressService";
 import { ScreenHead, Segmented } from "../../components/controls";
 import { useViewState } from "../../hooks/useViewState";
 import { href, navigate } from "../../router";
-import { useLive, useServices, useSettings } from "../../ServicesContext";
+import { useLiveState, useServices, useSettings } from "../../ServicesContext";
 import { WeightChart } from "./WeightChart";
 
 const SERIES = 8;
@@ -19,13 +18,15 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
   const { theme } = useSettings();
   const [range, setRange] = useViewState<RangeKey>("progress.range", () => "6M", "device");
   const [lastDayId, setLastDayId] = useViewState<string | null>("progress.day", () => null, "device");
-  const days = useLive(() => setup.days(), []);
+  const daysLive = useLiveState(() => setup.days(), [], "days");
+  const days = daysLive.value;
   // The Progress tab links to #/progress with no day: use the one picked last time.
   const day = days?.find((d) => d.id === (routeDayId ?? lastDayId)) ?? days?.[0];
   useEffect(() => {
     if (day && day.id !== lastDayId) setLastDayId(day.id);
   }, [day, lastDayId, setLastDayId]);
-  const data = useLive(() => (day ? progress.lines(day.id, range) : Promise.resolve(null)), [day?.id ?? null, range]);
+  const live = useLiveState(() => (day ? progress.lines(day.id, range) : Promise.resolve(null)), [day?.id ?? null, range], "progress");
+  const data = live.value;
 
   // Color follows the exercise (its slot on the day), never its position among visible lines.
   const colors = useMemo(() => {
@@ -46,7 +47,8 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
   const hidden = useMemo(() => new Set(hiddenIds), [hiddenIds]);
   const setHidden = (next: Set<string>) => setHiddenIds([...next]);
 
-  if (!days) return <div className="loading">Loading…</div>;
+  // "No days" and "nothing logged" only from fresh data: an older copy would say so by mistake.
+  if (!days || (!day && !daysLive.fresh)) return <div className="loading">Loading…</div>;
   if (!day) {
     return (
       <>
@@ -72,7 +74,10 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
 
   return (
     <>
-      <ScreenHead title="Progress" sub="Heaviest set each session" />
+      <ScreenHead
+        title="Progress"
+        sub={day.allExercises().some((e) => e.unit === "plates") ? "Heaviest set each session · plates counted in lb" : "Heaviest set each session"}
+      />
       <div className="progress-controls">
         <Segmented
           label="Workout day"
@@ -83,7 +88,7 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
         <Segmented label="Time range" options={RANGES} value={range} onChange={setRange} />
       </div>
 
-      {data && lines.length === 0 && (
+      {data && lines.length === 0 && live.fresh && (
         <div className="empty">
           <p>No weights logged for {day.name} in this range.</p>
         </div>
@@ -101,6 +106,10 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
               <button type="button" className="link" onClick={() => setHidden(new Set(lines.map((l) => l.exercise.id)))}>
                 None
               </button>
+              {/* Rename, merge (e.g. old spellings of one lift), restore, or delete exercises. */}
+              <a className="link" href={href({ name: "setup", dayId: day.id })}>
+                Edit
+              </a>
             </span>
           </div>
           <div className="series-chips">
@@ -114,6 +123,7 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
               >
                 <span className="swatch" style={{ background: colors.get(line.exercise.id) ?? "var(--series-other)" }} />
                 {line.exercise.name}
+                {line.exercise.unit === "plates" && <span className="archived">plates</span>}
                 {line.exercise.archived && <span className="archived">old</span>}
               </button>
             ))}
@@ -130,7 +140,7 @@ function DataTable({ lines }: { lines: ProgressLine[] }) {
   const dates = [...new Set(lines.flatMap((l) => l.points.map((p) => p.date.toString())))].sort().reverse();
   const value = (line: ProgressLine, date: string) => {
     const p = line.points.find((x) => x.date.toString() === date);
-    return p ? formatNumber(p.weight) : "";
+    return p ? p.label : "";
   };
   return (
     <details style={{ marginTop: 14 }}>

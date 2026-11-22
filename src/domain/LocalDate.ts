@@ -35,6 +35,15 @@ export class LocalDate {
     return LocalDate.of(Number(m[1]), Number(m[2]), Number(m[3]));
   }
 
+  /** Like `parse`, but null for anything that isn't `YYYY-MM-DD` (e.g. a hand-edited URL). */
+  static tryParse(iso: string): LocalDate | null {
+    try {
+      return LocalDate.parse(iso);
+    } catch {
+      return null;
+    }
+  }
+
   /** The date in the device's local time zone. */
   static fromDate(d: Date): LocalDate {
     return new LocalDate(d.getFullYear(), d.getMonth() + 1, d.getDate());
@@ -108,9 +117,14 @@ export class LocalDate {
     return this.compare(other) > 0;
   }
 
-  /** "Thu · Nov 20" */
+  /** "Thu, Nov 20" */
   label(): string {
-    return `${WEEKDAY_SHORT[this.weekday()]} · ${MONTH_SHORT[this.month - 1]} ${this.day}`;
+    return `${WEEKDAY_SHORT[this.weekday()]}, ${MONTH_SHORT[this.month - 1]} ${this.day}`;
+  }
+
+  /** "Thu, Nov 20 | Week 47" (the session screen's date line). */
+  labelWithWeek(): string {
+    return `${this.label()} | Week ${this.isoWeek()}`;
   }
 
   /** "Nov 20" */

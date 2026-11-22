@@ -21,8 +21,15 @@ export class SessionService {
     return (await this.find(workoutDayId, date)) ?? Session.start(workoutDayId, date);
   }
 
+  /**
+   * Saves one exercise's log into the session. A save for an exercise merged away or deleted on
+   * this day (an editor still open when that synced in, saving as it closes) is dropped once the
+   * session holds no log for it: SetupService.reconcile already filed that log, and writing it
+   * again would file its sets twice. Until then it replaces that log, which reconcile files once.
+   */
   async saveLog(workoutDayId: string, date: LocalDate, log: ExerciseLog): Promise<Session> {
-    const session = await this.open(workoutDayId, date);
+    const [session, day] = await Promise.all([this.open(workoutDayId, date), this.repos.days.get(workoutDayId)]);
+    if (day?.isRetired(log.exerciseId) && !session.log(log.exerciseId)) return session;
     return this.repos.sessions.save(session.withLog(log));
   }
 
@@ -56,6 +63,16 @@ export class SessionService {
       for (const log of session.logs) {
         if (!out.has(log.exerciseId) && log.hasResult()) out.set(log.exerciseId, { date: session.date, log });
       }
+    }
+    return out;
+  }
+
+  /** For each workout day, the last date it was done on or before `date` ("last Oct 12"). */
+  async lastWorkoutDates(date: LocalDate): Promise<Map<string, LocalDate>> {
+    const out = new Map<string, LocalDate>();
+    // Oldest first, so later sessions overwrite earlier ones.
+    for (const s of await this.repos.sessions.all()) {
+      if (s.isWorkout() && !s.date.isAfter(date)) out.set(s.workoutDayId, s.date);
     }
     return out;
   }

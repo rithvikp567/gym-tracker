@@ -25,6 +25,15 @@ export interface SessionRepository {
   onDate(date: LocalDate): Promise<Session[]>;
   save(session: Session): Promise<Session>;
   saveMany(sessions: Session[]): Promise<void>;
+  /**
+   * Saves corrections to stored sessions (SetupService.reconcile) dated 1 ms after the copy each
+   * was made from, not now: an edit made on any device after that copy still wins in sync. Each
+   * is saved only if the stored copy is still the one it was made from (`updatedAt` unchanged),
+   * so a save or sync that landed meanwhile is never overwritten. Returns how many were saved.
+   * Two devices that correct the same copy differently (each before hearing the other's merge or
+   * delete) save the same stamp; sync settles such a tie the same way everywhere (recordSync.settle).
+   */
+  saveRepairs(sessions: Session[]): Promise<number>;
 }
 
 export interface SplitRepository {
@@ -65,15 +74,46 @@ export interface SyncStatus {
   message: string | null;
 }
 
+/**
+ * Preferences that follow the account to the user's other devices (color style…), as one
+ * snapshot. Each setting keeps the time it last changed, and the newest change to each
+ * setting wins, so changing one setting never undoes another device's newer change to another.
+ */
+export interface PreferencesSnapshot {
+  values: Record<string, unknown>;
+  /** ISO time of the newest change to any setting; EPOCH = never changed (still the defaults). */
+  updatedAt: string;
+  /**
+   * ISO time each setting last changed, on any device. Copies saved before settings were
+   * stamped one by one have none: a setting without a stamp counts as changed at `updatedAt`.
+   */
+  stamps?: Record<string, string>;
+}
+
+/** Implemented by SettingsService; read and updated by sync. */
+export interface SyncedPreferences {
+  snapshot(): PreferencesSnapshot;
+  /**
+   * Applies another device's copy (the settings it lists, with their stamps) without queueing
+   * it for upload again. Settings it doesn't list keep their value here.
+   */
+  applyRemote(snapshot: PreferencesSnapshot): void;
+  /** Fires after a change made on this device. */
+  onLocalChange(listener: () => void): Unsubscribe;
+}
+
 /** Account + sync, as the UI sees it. `NoSync` is used when no backend is configured. */
 export interface SyncController {
   readonly configured: boolean;
+  /** Hands sync the preferences to keep in step with the account (call once at startup). */
+  attachPreferences(preferences: SyncedPreferences): void;
   status(): SyncStatus;
   subscribe(listener: (status: SyncStatus) => void): Unsubscribe;
   signIn(email: string, password: string): Promise<void>;
   /** Creates the account and signs in (Supabase's "Confirm email" must be off; no email is sent). */
   createAccount(email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
+  /** A sync the person asked for (the Sync button): also re-reads the account's preferences. */
   syncNow(): Promise<void>;
   /** Called after local writes; implementations debounce. */
   requestSync(): void;

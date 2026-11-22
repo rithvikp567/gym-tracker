@@ -1,66 +1,74 @@
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { LocalDate } from "../../../domain/LocalDate";
+import { CenterBlock } from "../../components/CenterBlock";
+import { BackButton } from "../../components/controls";
 import { Icon } from "../../components/Icon";
 import { useSwipe } from "../../hooks/useSwipe";
 import { href, navigate } from "../../router";
-import { useLive, useServices, useSettings } from "../../ServicesContext";
+import { useLiveState, useServices, useSettings } from "../../ServicesContext";
+import { slideNext, useSlide } from "../../slide";
+import { rememberHomeDay } from "../../homePick";
 import { ExerciseRow } from "./ExerciseRow";
-
-/** Set right before navigating so the next session slides in from the matching side. */
-let pendingSlide: "back" | "forward" | null = null;
-
-function safeDate(iso: string, fallback: LocalDate): LocalDate {
-  try {
-    return LocalDate.parse(iso);
-  } catch {
-    return fallback;
-  }
-}
+import { useDayStep } from "../../hooks/useDayStep";
+import { DayArrows } from "./DayArrows";
 
 /**
- * A workout day on a date — the "cell" from the sheet. Swipe right for the previous time you
- * did this workout, swipe left to come forward again.
+ * A workout day on a date — the "cell" from the sheet.
+ *  - ‹ › next to the date: the day before / after (whatever was logged or planned then).
+ *  - Last / Next session (or swipe right / left): the previous / next time you did this workout.
  */
 export function SessionScreen({ dayId, date: iso }: { dayId: string; date: string }) {
   const services = useServices();
   const { showLastSession } = useSettings();
   const today = services.calendar.today();
-  const date = safeDate(iso, today);
+  const date = LocalDate.tryParse(iso) ?? today;
   const root = useRef<HTMLDivElement>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [noteIds, setNoteIds] = useState<ReadonlySet<string>>(new Set());
+  // App remounts this screen for every workout + date, so open rows and notes start closed.
+  const slide = useSlide(`${dayId}/${iso}`);
+  const stepDay = useDayStep(date, dayId);
 
-  const data = useLive(async () => {
-    const [day, session, prev, next, last] = await Promise.all([
-      services.setup.days().then((days) => days.find((d) => d.id === dayId)),
-      services.sessions.open(dayId, date),
-      services.sessions.previous(dayId, date),
-      services.sessions.next(dayId, date),
-      services.sessions.lastResultsBefore(dayId, date),
-    ]);
-    return { day, session, prev, next, last };
-  }, [dayId, date.toString()]);
-
-  const slide = useMemo(() => {
-    const s = pendingSlide;
-    pendingSlide = null;
-    return s;
-  }, [iso]);
+  const daysLive = useLiveState(() => services.setup.days(), [], "days");
+  const days = daysLive.value;
+  const live = useLiveState(
+    async () => {
+      const [session, prev, next, last] = await Promise.all([
+        services.sessions.open(dayId, date),
+        services.sessions.previous(dayId, date),
+        services.sessions.next(dayId, date),
+        services.sessions.lastResultsBefore(dayId, date),
+      ]);
+      return { session, prev, next, last };
+    },
+    [dayId, date.toString()],
+    "session",
+  );
+  const data = live.value;
 
   const nextDate = data?.next?.date ?? (date.isBefore(today) ? today : null);
   const prevDate = data?.prev?.date ?? null;
 
-  const go = (target: LocalDate, direction: "back" | "forward") => {
-    pendingSlide = direction;
+  /**
+   * Another date of this same workout. Picking a date (or Back to today) moves Home's week
+   * along; peeking at Last / Next session doesn't, so Back still lands on the week you left.
+   */
+  const goSession = (target: LocalDate, direction: "back" | "forward" | null, moveHome: boolean) => {
+    if (direction) slideNext(direction);
     setOpenId(null);
+    if (moveHome) rememberHomeDay(target, today);
     navigate({ name: "session", dayId, date: target.toString() }, { replace: true });
   };
 
   useSwipe(root, {
-    onSwipeRight: prevDate ? () => go(prevDate, "back") : undefined,
-    onSwipeLeft: nextDate ? () => go(nextDate, "forward") : undefined,
+    onSwipeRight: prevDate ? () => goSession(prevDate, "back", false) : undefined,
+    onSwipeLeft: nextDate ? () => goSession(nextDate, "forward", false) : undefined,
   });
 
-  if (data && !data.day) {
+  const day = days?.find((d) => d.id === dayId);
+  // Only from fresh data: a copy from before the day was added would miss it. Until then the
+  // usual screen draws, without the name or rows.
+  if (days && !day && daysLive.fresh) {
     return (
       <div className="empty">
         <p>This workout day doesn't exist anymore.</p>
@@ -71,101 +79,128 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
     );
   }
 
-  const { day, session, last } = data ?? {};
+  const { session, last } = data ?? {};
   const exercises = day
     ? [...day.activeExercises(), ...day.allExercises().filter((e) => e.archived && session?.log(e.id)?.hasContent())]
     : [];
+  const hasContent = session?.hasContent() ?? false;
   const isToday = date.equals(today);
+  const toggleNote = (id: string) =>
+    setNoteIds((ids) => {
+      const next = new Set(ids);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   return (
     <div ref={root}>
-    <div className={`session-screen${slide ? ` slide-${slide}` : ""}`} key={iso}>
-      <div className="session-head">
-        <a className="icon-btn" href={href({ name: "home" })} aria-label="Back to this week">
-          <Icon name="left" />
-        </a>
-        <div className="session-title">
-          <h1>{day?.name ?? " "}</h1>
-        </div>
-        <div className="inline">
-          <button type="button" className="icon-btn" aria-label="Previous time" disabled={!prevDate} onClick={() => prevDate && go(prevDate, "back")}>
-            <Icon name="left" size={20} />
-          </button>
-          <button type="button" className="icon-btn" aria-label="Next time" disabled={!nextDate} onClick={() => nextDate && go(nextDate, "forward")}>
-            <Icon name="right" size={20} />
-          </button>
-        </div>
-      </div>
-      <div className="swipe-hint">
-        <label className="date-picker num">
-          {date.label()} · Week {date.isoWeek()}
-          <Icon name="down" size={14} />
-          <input
-            type="date"
-            aria-label="Change date"
-            value={date.toString()}
-            onChange={(e) => e.target.value && navigate({ name: "session", dayId, date: e.target.value }, { replace: true })}
-          />
-        </label>
-        <span className="hint-text">{prevDate ? "‹ swipe for last time" : ""}</span>
-      </div>
-
-      {!isToday && (
-        <div className="past-banner">
-          <span>{date.isBefore(today) ? `Viewing ${date.shortLabel()}` : `Planning ahead for ${date.shortLabel()}`}</span>
-          <a className="link" onClick={() => (pendingSlide = "forward")} href={href({ name: "session", dayId, date: today.toString() })}>
-            Back to today
-          </a>
-        </div>
-      )}
-
-      {data && (
-        <>
-          <div className="ex-head" aria-hidden>
-            <span>Exercise</span>
-            <span>Weight</span>
-            <span>Reps</span>
-            <span>{showLastSession ? "Last time" : ""}</span>
-            <span>Target</span>
+      <div className="session-screen page-fill">
+        <div className="session-head">
+          <BackButton fallback={{ name: "home" }} />
+          <h1 className="session-name">{day?.name ?? "\u00a0"}</h1>
+          <div className="session-jumps" role="group" aria-label={`Other ${day?.name ?? "workout"} sessions`}>
+            <button
+              type="button"
+              className="jump-btn"
+              disabled={!prevDate}
+              aria-label={prevDate ? `Last session, ${prevDate.shortLabel()}` : "No earlier session"}
+              onClick={() => prevDate && goSession(prevDate, "back", false)}
+            >
+              <Icon name="left" size={14} />
+              Last<span className="wide-only">&nbsp;session</span>
+            </button>
+            <button
+              type="button"
+              className="jump-btn"
+              disabled={!nextDate}
+              aria-label={nextDate ? `Next session, ${nextDate.shortLabel()}` : "No later session"}
+              onClick={() => nextDate && goSession(nextDate, "forward", false)}
+            >
+              Next<span className="wide-only">&nbsp;session</span>
+              <Icon name="right" size={14} />
+            </button>
           </div>
-          <div className="list">
-            {exercises.map((ex) => (
-              <ExerciseRow
-                key={`${iso}:${ex.id}`}
-                exercise={ex}
-                log={session?.log(ex.id)}
-                last={last?.get(ex.id)}
-                showLast={showLastSession}
-                open={openId === ex.id}
-                onToggle={() => setOpenId((id) => (id === ex.id ? null : ex.id))}
-                onSave={(log) => void services.sessions.saveLog(dayId, date, log)}
+          <div className="session-sub">
+            <label className="date-picker num">
+              {date.labelWithWeek()}
+              <Icon name="down" size={14} />
+              <input
+                type="date"
+                aria-label="Change date"
+                value={date.toString()}
+                onChange={(e) => e.target.value && goSession(LocalDate.tryParse(e.target.value) ?? date, null, true)}
               />
-            ))}
+            </label>
+            <DayArrows onStep={stepDay} />
           </div>
-          {!exercises.length && (
-            <div className="empty">
-              <p>No exercises on {day?.name} yet.</p>
-              <a className="btn" href={href({ name: "setup" })}>
-                Add exercises
-              </a>
-            </div>
-          )}
-          {session?.hasContent() && (
-            <div style={{ marginTop: 28, textAlign: "center" }}>
-              <button
-                type="button"
-                className="btn danger"
-                onClick={() => {
-                  if (confirm(`Delete ${day?.name} on ${date.shortLabel()}?`)) void services.sessions.delete(dayId, date);
-                }}
-              >
-                <Icon name="trash" size={16} /> Delete this session
+        </div>
+
+        {/* Only the content slides: the header (and its arrows) stays put under your finger. */}
+        <div className={`slide-body${slide ? ` slide-${slide}` : ""}`}>
+          {!isToday && (
+            <div className="past-banner">
+              <span>{date.isBefore(today) ? `Viewing ${date.shortLabel()}` : `Planning ahead for ${date.shortLabel()}`}</span>
+              <button type="button" className="link" onClick={() => goSession(today, date.isBefore(today) ? "forward" : "back", true)}>
+                Back to today
               </button>
             </div>
           )}
-        </>
-      )}
-    </div>
+
+          <CenterBlock hold={openId !== null || noteIds.size > 0}>
+            {data && (
+              <>
+                <div className="ex-head" aria-hidden>
+                  <span>Exercise</span>
+                  <span>Weight</span>
+                  <span>Reps</span>
+                  <span>{showLastSession ? "Last time" : ""}</span>
+                  <span>Target</span>
+                </div>
+                <div className="list">
+                  {exercises.map((ex) => (
+                    <ExerciseRow
+                      key={`${iso}:${ex.id}`}
+                      exercise={ex}
+                      log={session?.log(ex.id)}
+                      last={last?.get(ex.id)}
+                      showLast={showLastSession}
+                      open={openId === ex.id}
+                      onToggle={() => setOpenId((id) => (id === ex.id ? null : ex.id))}
+                      noteOpen={noteIds.has(ex.id)}
+                      onToggleNote={() => toggleNote(ex.id)}
+                      onSave={(log) => void services.sessions.saveLog(dayId, date, log)}
+                    />
+                  ))}
+                </div>
+                {/* Only from fresh data: a copy from before you added exercises would show it by mistake. */}
+                {!exercises.length && day && daysLive.fresh && live.fresh && (
+                  <div className="empty">
+                    <p>No exercises on {day.name} yet.</p>
+                    <a className="btn" href={href({ name: "setup", dayId })}>
+                      Add exercises
+                    </a>
+                  </div>
+                )}
+                {/* Always there, hidden until something is logged: the centered list keeps its height, so it doesn't jump. */}
+                <div className={`session-foot${hasContent ? "" : " is-hidden"}`} aria-hidden={hasContent ? undefined : true}>
+                  <button
+                    type="button"
+                    className="btn danger"
+                    disabled={!hasContent}
+                    onClick={() => {
+                      if (confirm(`Delete ${day?.name ?? "this workout"} on ${date.shortLabel()}?`))
+                        void services.sessions.delete(dayId, date);
+                    }}
+                  >
+                    <Icon name="trash" size={16} /> Delete this session
+                  </button>
+                </div>
+              </>
+            )}
+          </CenterBlock>
+        </div>
+      </div>
     </div>
   );
 }

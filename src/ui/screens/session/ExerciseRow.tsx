@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import type { KeyboardEvent } from "react";
 import type { Exercise } from "../../../domain/Exercise";
 import type { ExerciseLog } from "../../../domain/ExerciseLog";
 import type { PastLog } from "../../../services/SessionService";
@@ -12,6 +12,9 @@ interface Props {
   showLast: boolean;
   open: boolean;
   onToggle: () => void;
+  /** The day's note is peeked at from the screen (it holds the list still while one is open). */
+  noteOpen: boolean;
+  onToggleNote: () => void;
   onSave: (log: ExerciseLog) => void;
 }
 
@@ -19,21 +22,22 @@ interface Props {
  * One exercise in a session. Collapsed: name, target (3×8), last time, weight, reps.
  * Tap to open the editor; tap the note icon to peek at that day's note.
  */
-export function ExerciseRow({ exercise, log, last, showLast, open, onToggle, onSave }: Props) {
-  const [noteOpen, setNoteOpen] = useState(false);
+export function ExerciseRow({ exercise, log, last, showLast, open, onToggle, noteOpen, onToggleNote, onSave }: Props) {
   const note = log?.note.trim() ?? "";
   const isCheck = exercise.kind === "check";
 
+  // Each log is labeled in the unit it was saved in ("360" stays pounds after a switch to plates);
+  // exercise.bareUnit covers logs saved without one.
   const value = isCheck
     ? log?.done === true
       ? "Done"
       : log?.done === false
         ? "Skipped"
         : ""
-    : (log?.weightLabel() ?? "");
+    : (log?.weightLabel(exercise.bareUnit) ?? "");
   const target = exercise.targetLabel();
   // Phone: "2×8 | Last: 20 – 8/6/6". Desktop shows the same value in its own column, minus "Last:".
-  const lastText = last ? last.log.summary(" – ") : "";
+  const lastText = last ? last.log.summary(" – ", exercise.bareUnit) : "";
 
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -56,7 +60,7 @@ export function ExerciseRow({ exercise, log, last, showLast, open, onToggle, onS
             aria-expanded={noteOpen}
             onClick={(e) => {
               e.stopPropagation();
-              setNoteOpen((v) => !v);
+              onToggleNote();
             }}
           >
             <Icon name="note" size={15} />

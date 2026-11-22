@@ -24,6 +24,11 @@ class Stamper {
     this.last = Math.max(this.clock.now().getTime(), this.last + 1);
     return new Date(this.last).toISOString();
   }
+
+  /** A record was saved with an older chosen stamp (a repair): saves after it still come later. */
+  passed(stamp: number): void {
+    this.last = Math.max(this.last, stamp);
+  }
 }
 
 class StoreWorkoutDays implements WorkoutDayRepository {
@@ -89,6 +94,18 @@ class StoreSessions implements SessionRepository {
     if (!sessions.length) return;
     await this.store.putMany("sessions", sessions.map((s) => s.withUpdatedAt(this.stamp.next()).toJSON()), "local");
     this.changed();
+  }
+
+  async saveRepairs(sessions: Session[]): Promise<number> {
+    if (!sessions.length) return 0;
+    const repairs = sessions.map((s) => ({
+      record: s.withUpdatedAt(new Date(Date.parse(s.updatedAt) + 1).toISOString()).toJSON(),
+      basedOn: s.updatedAt,
+    }));
+    const saved = new Set(await this.store.putIfUnchanged("sessions", repairs));
+    for (const { record } of repairs) if (saved.has(record.id)) this.stamp.passed(Date.parse(record.updatedAt));
+    if (saved.size) this.changed();
+    return saved.size;
   }
 }
 

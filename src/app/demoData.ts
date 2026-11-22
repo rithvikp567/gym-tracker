@@ -1,4 +1,5 @@
 import { ExerciseLog } from "../domain/ExerciseLog";
+import { platesToPounds, type LoadUnit } from "../domain/Load";
 import { LocalDate, type Weekday } from "../domain/LocalDate";
 import { Session } from "../domain/Session";
 import { SetEntry } from "../domain/SetEntry";
@@ -9,7 +10,17 @@ import type { Clock, Repositories } from "../services/ports";
  * Sample data for `?demo` (stored in memory only), so the screens can be previewed and
  * screenshotted without touching real data.
  */
-const PLAN: { name: string; weekdays: Weekday[]; exercises: [name: string, sets: number, reps: string, start: number, step: number][] }[] = [
+type DemoExercise = [
+  name: string,
+  sets: number,
+  reps: string,
+  start: number,
+  step: number,
+  /** poundsUntilWeek: a plates exercise logged in pounds for its first weeks (saved with "lb" on each log). */
+  extra?: { unit?: LoadUnit; retiredAfterWeek?: number; poundsUntilWeek?: number },
+];
+
+const PLAN: { name: string; weekdays: Weekday[]; exercises: DemoExercise[] }[] = [
   {
     name: "Upper 1",
     weekdays: [0],
@@ -31,6 +42,8 @@ const PLAN: { name: string; weekdays: Weekday[]; exercises: [name: string, sets:
       ["Squat", 3, "8", 240, 4],
       ["Ext", 3, "10", 265, 2],
       ["Curl", 3, "8", 140, 1.5],
+      ["Leg press", 2, "10", 2, 0.06, { unit: "plates", poundsUntilWeek: 6 }],
+      ["Hack squat", 3, "8", 180, 3, { retiredAfterWeek: 8 }],
     ],
   },
   {
@@ -61,10 +74,10 @@ export async function seedDemoData(repos: Repositories, clock: Clock): Promise<v
       const cardio = day.activeExercises()[0]!;
       day = day.withExercise(cardio.with({ targetText: "45 min walk" }));
     }
-    for (const [name, sets, reps] of plan.exercises) {
+    for (const [name, sets, reps, , , extra] of plan.exercises) {
       day = day.addExercise(name);
       const ex = day.activeExercises().at(-1)!;
-      day = day.withExercise(ex.with({ targetSets: sets, targetReps: reps }));
+      day = day.withExercise(ex.with({ targetSets: sets, targetReps: reps, unit: extra?.unit ?? "lb" }));
     }
     days.push(day);
     for (const wd of plan.weekdays) split = split.withWeekday(wd, day.id);
@@ -85,15 +98,28 @@ export async function seedDemoData(repos: Repositories, clock: Clock): Promise<v
         continue;
       }
       const plan = PLAN.find((p) => p.name === day.name)!.exercises.find((e) => e[0] === ex.name)!;
-      const [, sets, reps, base, step] = plan;
-      const weight = base ? Math.round((base + step * weeks + (random() - 0.5) * step * 2) / 2.5) * 2.5 : null;
+      const [, sets, reps, base, step, extra] = plan;
+      if (extra?.retiredAfterWeek !== undefined && weeks > extra.retiredAfterWeek) continue;
+      // Older demo logs carry no unit (they follow the exercise), like data saved before units were stored.
+      const inPounds = extra?.unit === "plates" && weeks < (extra.poundsUntilWeek ?? 0);
+      const round = extra?.unit === "plates" && !inPounds ? 0.5 : 2.5;
+      const value = base ? base + step * weeks + (random() - 0.5) * step * 2 : 0;
+      const weight = base ? Math.round((inPounds ? platesToPounds(value) : value) / round) * round : null;
       const target = Number(reps);
       const entries = Array.from({ length: sets }, (_, i) => new SetEntry(weight, Math.max(4, target - i + Math.round(random() * 2 - 1))));
-      let log = ExerciseLog.empty(ex.id).withSets(entries);
+      let log = ExerciseLog.empty(ex.id).withSets(entries).withUnit(inPounds ? "lb" : undefined);
       if (random() < 0.06) log = log.withNote("Last set was a grind, stay here next week");
       session = session.withLog(log);
     }
     sessions.push(session);
+  }
+
+  // Exercises that were swapped out partway through keep their history as "removed".
+  for (const [i, plan] of PLAN.entries()) {
+    for (const [name, , , , , extra] of plan.exercises) {
+      const ex = days[i]!.activeExercises().find((e) => e.name === name);
+      if (ex && extra?.retiredAfterWeek !== undefined) days[i] = days[i]!.archiveExercise(ex.id);
+    }
   }
 
   await repos.days.saveMany(days);

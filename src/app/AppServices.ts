@@ -37,6 +37,10 @@ export async function createAppServices(): Promise<AppServices> {
 
   let sync: SyncController = new NoSync();
   const repos = new StoreRepositories(store, systemClock, () => sync.requestSync());
+  const setup = new SetupService(repos);
+  // Logs that synced in for an exercise merged or deleted on another device get filed into the
+  // exercise it became, or dropped with it. A background repair: a failure only waits for the next run.
+  const fileLateLogs = () => void setup.reconcile().catch((e: unknown) => console.warn("Couldn't file late logs", e));
 
   const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
   const key = import.meta.env.VITE_SUPABASE_KEY as string | undefined;
@@ -44,19 +48,26 @@ export async function createAppServices(): Promise<AppServices> {
     await seedDemoData(repos, systemClock);
   } else if (url && key) {
     const { SupabaseSync } = await import("../data/SupabaseSync");
-    sync = new SupabaseSync(url, key, store, () => repos.notifyExternalChange());
+    sync = new SupabaseSync(url, key, store, () => {
+      repos.notifyExternalChange();
+      fileLateLogs();
+    });
   }
+  fileLateLogs(); // once at startup too, for anything an earlier visit synced but didn't file
+
+  const settings = new SettingsService(browserKeyValueStore(), systemClock);
+  sync.attachPreferences(settings);
 
   return {
     mode: demo ? "demo" : "device",
     changes: repos.changes,
-    setup: new SetupService(repos),
+    setup,
     sessions: new SessionService(repos),
     calendar: new CalendarService(repos, systemClock),
     progress: new ProgressService(repos, systemClock),
     imports: new ImportService(repos),
     backup: new BackupService(repos),
-    settings: new SettingsService(browserKeyValueStore()),
+    settings,
     sync,
   };
 }

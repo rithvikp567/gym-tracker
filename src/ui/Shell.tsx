@@ -9,9 +9,9 @@ const TABS: { name: Route["name"]; label: string; icon: IconName; to: Route }[] 
   { name: "settings", label: "Settings", icon: "settings", to: { name: "settings" } },
 ];
 
-/** Which tab a route belongs to (a session lives under Home, setup under Settings). */
+/** Which tab a route belongs to (a session or rest day lives under Home, setup under Settings). */
 function tabOf(route: Route): Route["name"] {
-  if (route.name === "session") return "home";
+  if (route.name === "session" || route.name === "day") return "home";
   if (route.name === "setup" || route.name === "import") return "settings";
   return route.name;
 }

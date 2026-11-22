@@ -2,7 +2,7 @@ import { THEMES } from "../../../services/SettingsService";
 import { Icon } from "../../components/Icon";
 import { ScreenHead, Segmented, Toggle } from "../../components/controls";
 import { href } from "../../router";
-import { useServices, useSettings } from "../../ServicesContext";
+import { useServices, useSettings, useSyncStatus } from "../../ServicesContext";
 import { AccountCard } from "./AccountCard";
 import { InstallCard } from "./InstallCard";
 
@@ -12,8 +12,10 @@ const SWATCH: Record<string, [bg: string, accent: string]> = {
 };
 
 export function SettingsScreen() {
-  const { settings, backup } = useServices();
+  const { settings, backup, sync } = useServices();
   const current = useSettings();
+  const status = useSyncStatus();
+  const followsAccount = sync.configured && status.email !== null;
 
   const download = async () => {
     const json = await backup.exportJson();
@@ -35,6 +37,9 @@ export function SettingsScreen() {
           <div className="text">
             <div>Color style</div>
             <div className="desc">{THEMES.find((t) => t.key === current.theme)?.description}</div>
+            <div className="desc faint">
+              {followsAccount ? "Saved to your account, so your other devices match." : sync.configured ? "Sign in to use the same style on all your devices." : "Saved on this device."}
+            </div>
           </div>
         </div>
         <Segmented
