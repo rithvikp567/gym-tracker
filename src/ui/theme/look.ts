@@ -1,14 +1,14 @@
 /**
  * The look as colors: parsing and formatting hex colors, contrast, the Custom theme's tokens,
- * and the text color on a custom accent. Pure functions (no DOM), so they're unit-tested and
- * shared by LookSync and the color picker.
+ * and the accent's fill and text color where tokens.css can't know them. Pure functions (no
+ * DOM), so they're unit-tested and shared by LookSync and the color picker.
  *
  * Preset themes and accents are colored by tokens.css. A Custom theme or accent is a "token
  * override": `resolveLook` returns the custom properties to set on <html>, and LookSync saves
  * the whole resolved look under LOOK_KEY so index.html's head script can paint it before the
  * first frame without repeating this math.
  */
-import { THEMES, type AccentName, type Family, type Settings, type ThemeId, type ThemeName } from "../../services/SettingsService";
+import { THEMES, type AccentId, type AccentName, type Family, type Settings, type ThemeId, type ThemeName } from "../../services/SettingsService";
 
 /** A color: r, g, b 0–255, a (opacity) 0–1. */
 export interface Rgba {
@@ -32,15 +32,47 @@ const WHITE: Rgba = { r: 255, g: 255, b: 255, a: 1 };
 /** Where the resolved look is kept for index.html's head script. */
 export const LOOK_KEY = "gym-tracker.look";
 
-/** Each preset theme's --bg (the browser bar's color). tokens.css is the source; tests/look.test.ts checks they match. */
-export const THEME_BG: Record<ThemeId, string> = {
-  light: "#f5f4f0",
-  sand: "#f3ecde",
-  mist: "#eef2f5",
-  oled: "#000000",
-  graphite: "#121214",
-  midnight: "#0e131b",
+/** What text and the accent sit on: a theme's page, panels, surfaces and tiles. */
+export interface Grounds {
+  bg: string;
+  panel: string;
+  surface: string;
+  surfaceRaised: string;
+  tile: string;
+}
+
+/**
+ * Each preset theme's grounds. tokens.css is the source; tests/look.test.ts checks they match.
+ * `bg` is also the browser bar's color, and the rest is what a custom accent must read on.
+ */
+export const THEME_GROUNDS: Record<ThemeId, Grounds> = {
+  light: { bg: "#f5f4f0", panel: "#ebeae5", surface: "#ffffff", surfaceRaised: "#eeede8", tile: "#ffffff" },
+  sand: { bg: "#f3ecde", panel: "#e9e0ce", surface: "#fcf8f0", surfaceRaised: "#ece4d4", tile: "#fcf8f0" },
+  mist: { bg: "#eef2f5", panel: "#e2e8ee", surface: "#ffffff", surfaceRaised: "#e6ecf1", tile: "#ffffff" },
+  oled: { bg: "#000000", panel: "#0c0c0d", surface: "#0e0e0f", surfaceRaised: "#18181a", tile: "#161618" },
+  graphite: { bg: "#121214", panel: "#18181b", surface: "#1c1c20", surfaceRaised: "#26262b", tile: "#222226" },
+  midnight: { bg: "#0e131b", panel: "#131a24", surface: "#151c26", surfaceRaised: "#222c3a", tile: "#1a2230" },
 };
+
+/** Each preset theme's --bg (the browser bar's color). */
+export const THEME_BG = Object.fromEntries(Object.entries(THEME_GROUNDS).map(([k, g]) => [k, g.bg])) as Record<ThemeId, string>;
+
+/**
+ * Each preset accent's fill per family (tokens.css is the source; tests check they match).
+ * Ink has none: it's the theme's text color, which reads everywhere already.
+ */
+export const ACCENT_FILLS: Record<Exclude<AccentId, "ink">, Record<Family, string>> = {
+  lime: { light: "#3f6a0a", dark: "#c6f432" },
+  blue: { light: "#2a5f9e", dark: "#7db7ff" },
+  teal: { light: "#0c6a65", dark: "#4fd1c5" },
+  amber: { light: "#805b0e", dark: "#f2b84b" },
+  orange: { light: "#9e4219", dark: "#ff9a62" },
+  purple: { light: "#6a48ae", dark: "#b9a2f2" },
+  pink: { light: "#a33361", dark: "#f48dbb" },
+};
+
+/** How well the accent reads as text (links, numbers, today's date) on every ground. */
+export const ACCENT_TEXT = 4.5;
 
 /** The tokens every theme sets (tokens.css), which a Custom theme sets on <html> instead. */
 export const THEME_TOKENS = [
@@ -154,12 +186,8 @@ export function fromHsva({ h, s, v, a }: Hsva): Rgba {
 
 /** Luminance where black and white text read equally well: lighter colors make light themes. */
 const FAMILY_SPLIT = Math.sqrt(1.05 * 0.05) - 0.05;
-/**
- * How light a dark theme's background may be, and how dark a light one's: past these, text
- * can't keep 7:1 on every surface (and preset accents stay readable as text on dark ones).
- */
-const DARK_MAX = 0.05;
-const LIGHT_MIN = 0.55;
+/** The text contrast a Custom theme keeps on every ground: --text, --text-2, --text-3. */
+const TEXT_RATIOS = [7, 4.5, 3] as const;
 
 /** The family a color makes as a theme: light when black text reads better on it. */
 export function familyOfColor(color: Rgba): Family {
@@ -169,46 +197,38 @@ export function familyOfColor(color: Rgba): Family {
 /**
  * Every theme token for a Custom theme color. The family comes from the color; see-through
  * means closer to that family's plain base (black for dark, white for light). The background
- * is the color, darkened or lightened only as far as readable text needs; panels, tiles and
- * lines step from it toward white in dark themes and toward black in light ones (cards in a
- * light theme are lighter than the page, like the presets); the three text colors keep at
- * least 7:1, 4.5:1 and 3:1 on the background, panel and tiles.
+ * is the color, darkened or lightened only when text couldn't otherwise reach 7:1 on it and on
+ * what's laid over it; panels, tiles and lines step from it toward white in dark themes and
+ * toward black in light ones (cards in a light theme are lighter than the page, like the
+ * presets); the three text colors keep at least 7:1, 4.5:1 and 3:1 on all of those grounds.
  */
 export function customThemeTokens(color: string): { family: Family; tokens: Record<(typeof THEME_TOKENS)[number], string> } {
   const picked = parseColor(color) ?? BLACK;
   const family = familyOfColor(picked);
   const dark = family === "dark";
-  const base = dark ? BLACK : WHITE;
-  // Rounded to what the tokens hold, so contrast is checked on the colors that show.
-  const bg = rounded(keepReadable(over(picked, base), family));
+  const bg = keepReadable(rounded(over(picked, dark ? BLACK : WHITE)), family);
   const toward = (t: number) => rounded(mix(bg, dark ? WHITE : BLACK, t));
-  const lighter = (t: number) => rounded(mix(bg, WHITE, t));
-
-  const panel = toward(dark ? 0.035 : 0.04);
-  const surface = dark ? toward(0.05) : lighter(0.7);
-  const tile = dark ? toward(0.075) : lighter(0.7);
-  const hairline = toward(dark ? 0.12 : 0.09);
-  const grounds = [bg, panel, tile];
-  const text = textColor(bg, family, grounds, 0.88, 7);
-  const text3 = textColor(bg, family, grounds, 0.38, 3);
+  const g = laidOver(bg, family);
+  const grounds = [bg, g.panel, g.surface, g.surfaceRaised, g.tile];
+  const text3 = textColor(bg, family, grounds, 0.38, TEXT_RATIOS[2]);
   return {
     family,
     tokens: {
       "--bg": formatColor(bg),
-      "--panel": formatColor(panel),
-      "--surface": formatColor(surface),
-      "--surface-raised": formatColor(dark ? toward(0.11) : toward(0.035)),
-      "--tile": formatColor(tile),
+      "--panel": formatColor(g.panel),
+      "--surface": formatColor(g.surface),
+      "--surface-raised": formatColor(g.surfaceRaised),
+      "--tile": formatColor(g.tile),
       "--tile-line": formatColor(toward(dark ? 0.13 : 0.09)),
-      "--row-bg": formatColor(surface),
+      "--row-bg": formatColor(g.surface),
       "--row-radius": "14px",
       "--row-gap": "8px",
       "--row-pad-x": "14px",
       "--row-divider": "transparent",
-      "--hairline": formatColor(hairline),
+      "--hairline": formatColor(toward(dark ? 0.12 : 0.09)),
       "--hairline-strong": formatColor(toward(dark ? 0.2 : 0.17)),
-      "--text": text,
-      "--text-2": textColor(bg, family, grounds, 0.6, 4.5),
+      "--text": textColor(bg, family, grounds, 0.88, TEXT_RATIOS[0]),
+      "--text-2": textColor(bg, family, grounds, 0.6, TEXT_RATIOS[1]),
       "--text-3": text3,
       "--chart-grid": formatColor(toward(dark ? 0.1 : 0.07)),
       "--chart-axis": text3,
@@ -216,19 +236,36 @@ export function customThemeTokens(color: string): { family: Family; tokens: Reco
   };
 }
 
-/** `bg` darkened (dark family) or lightened (light) just enough to stay inside its family's readable range. */
+/** The grounds a Custom theme lays over its background (rounded to what the tokens hold). */
+function laidOver(bg: Rgba, family: Family): Omit<Record<keyof Grounds, Rgba>, "bg"> {
+  const dark = family === "dark";
+  const toward = (t: number) => rounded(mix(bg, dark ? WHITE : BLACK, t));
+  const lighter = (t: number) => rounded(mix(bg, WHITE, t));
+  return {
+    panel: toward(dark ? 0.035 : 0.04),
+    surface: dark ? toward(0.05) : lighter(0.7),
+    surfaceRaised: dark ? toward(0.11) : toward(0.035),
+    tile: dark ? toward(0.075) : lighter(0.7),
+  };
+}
+
+/**
+ * `bg` as it is when plain white (dark family) or black (light) text reaches 7:1 on it and on
+ * everything laid over it; otherwise darkened or lightened just that far, keeping its hue.
+ */
 function keepReadable(bg: Rgba, family: Family): Rgba {
   const dark = family === "dark";
-  const fits = (c: Rgba) => (dark ? luminance(c) <= DARK_MAX : luminance(c) >= LIGHT_MIN);
+  const end = dark ? WHITE : BLACK;
+  const fits = (c: Rgba) => [c, ...Object.values(laidOver(c, family))].every((g) => contrast(end, g) >= TEXT_RATIOS[0]);
   if (fits(bg)) return bg;
   const base = dark ? BLACK : WHITE;
   let [lo, hi] = [0, 1]; // share of the base mixed in: hi always fits
   for (let i = 0; i < 24; i++) {
     const mid = (lo + hi) / 2;
-    if (fits(mix(bg, base, mid))) hi = mid;
+    if (fits(rounded(mix(bg, base, mid)))) hi = mid;
     else lo = mid;
   }
-  return mix(bg, base, hi);
+  return rounded(mix(bg, base, hi));
 }
 
 /**
@@ -249,6 +286,28 @@ function rounded(c: Rgba): Rgba {
   return { r: Math.round(c.r), g: Math.round(c.g), b: Math.round(c.b), a: c.a };
 }
 
+// ───────────── The accent ─────────────
+
+/**
+ * An accent fill that reads as text at 4.5:1 on every ground: `fill` itself when it does,
+ * else lightened (dark family) or darkened (light) just that far, keeping its hue, like the
+ * presets' separate light and dark fills. Checked as if opaque; a see-through fill keeps its
+ * opacity.
+ */
+export function readableAccent(fill: Rgba, family: Family, grounds: readonly Rgba[]): Rgba {
+  const end = family === "dark" ? WHITE : BLACK;
+  const opaque = rounded({ ...fill, a: 1 });
+  const reads = (c: Rgba) => grounds.every((g) => contrast(c, g) >= ACCENT_TEXT);
+  if (reads(opaque)) return fill;
+  let [lo, hi] = [0, 1]; // share of the end mixed in: hi always reads (plain white or black)
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    if (reads(rounded(mix(opaque, end, mid)))) hi = mid;
+    else lo = mid;
+  }
+  return { ...rounded(mix(opaque, end, hi)), a: fill.a };
+}
+
 // ───────────── The whole look ─────────────
 
 /** The look to show, resolved: what <html> gets and what the head script repeats before the first frame. */
@@ -264,29 +323,56 @@ export interface Look {
 
 export type LookSettings = Pick<Settings, "theme" | "customThemeColor" | "accent" | "customAccentColor">;
 
+const FAMILIES: readonly Family[] = ["light", "dark"];
+const slot = (family: Family) => (family === "light" ? "l" : "d");
+
+/** The accent fill token the page uses in `family` (`--accent-l` or `--accent-d`). */
+export function accentFillToken(family: Family): string {
+  return `--accent-${slot(family)}`;
+}
+
 export function resolveLook(s: LookSettings): Look {
   const vars: Record<string, string> = {};
+  // Per family: where the accent must read, and what a see-through accent shows over.
+  const grounds: Record<Family, Rgba[]> = { light: presetGrounds("light"), dark: presetGrounds("dark") };
+  const behind: Record<Family, Rgba> = { light: parseColor(THEME_BG.light)!, dark: parseColor(THEME_BG.oled)! };
   let family: Family;
   let bg: string;
-  if (s.theme === "custom" && s.customThemeColor) {
-    const custom = customThemeTokens(s.customThemeColor);
-    family = custom.family;
-    bg = custom.tokens["--bg"];
-    Object.assign(vars, custom.tokens);
+  const customTheme = s.theme === "custom" && s.customThemeColor ? customThemeTokens(s.customThemeColor) : null;
+  if (customTheme) {
+    const t = customTheme.tokens;
+    family = customTheme.family;
+    bg = t["--bg"];
+    Object.assign(vars, t);
+    grounds[family] = [t["--bg"], t["--panel"], t["--surface"], t["--surface-raised"], t["--tile"]].map((c) => parseColor(c)!);
   } else {
     const preset = THEMES.find((t) => t.key === s.theme) ?? THEMES.find((t) => t.key === "oled")!;
     family = preset.family;
     bg = THEME_BG[preset.key];
   }
-  const accent = s.accent === "custom" && s.customAccentColor ? parseColor(s.customAccentColor) : null;
-  if (accent) {
-    // One color for both families; the text on it is black or white, whichever reads better
-    // on the accent as it looks over this background.
-    const fill = formatColor(accent);
-    const ink = inkOn(accent, parseColor(bg) ?? BLACK);
-    Object.assign(vars, { "--accent-l": fill, "--accent-d": fill, "--accent-ink-l": ink, "--accent-ink-d": ink });
+  behind[family] = parseColor(bg)!;
+
+  const setAccent = (f: Family, fill: Rgba) => {
+    vars[`--accent-${slot(f)}`] = formatColor(fill);
+    vars[`--accent-ink-${slot(f)}`] = inkOn(fill, behind[f]);
+  };
+  const custom = s.accent === "custom" && s.customAccentColor ? parseColor(s.customAccentColor) : null;
+  if (custom) {
+    // A fill per family, like the presets: the color as picked wherever it reads as text,
+    // with black or white text on it, whichever reads better over that family's background.
+    for (const f of FAMILIES) setAccent(f, readableAccent(custom, f, grounds[f]));
+  } else if (customTheme && s.accent !== "ink" && s.accent !== "custom") {
+    // A preset accent is made for the preset themes; on a Custom one it moves only if it must.
+    const preset = parseColor(ACCENT_FILLS[s.accent][family])!;
+    const fill = readableAccent(preset, family, grounds[family]);
+    if (formatColor(fill) !== formatColor(preset)) setAccent(family, fill);
   }
   return { theme: s.theme, accent: s.accent, family, bg, vars };
+}
+
+/** Every ground of the preset themes in `family`. */
+function presetGrounds(family: Family): Rgba[] {
+  return THEMES.filter((t) => t.family === family).flatMap((t) => Object.values(THEME_GROUNDS[t.key]).map((c) => parseColor(c)!));
 }
 
 /** The same look (for skipping work when nothing changed). */

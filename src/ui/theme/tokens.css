@@ -13,8 +13,8 @@
  *                text color are set on <html> the same way
  * The selectors are bare attributes, so an element with its own data-theme / data-family /
  * data-accent (the previews in Settings) shows that look inside it.
- * Each theme sets the same tokens (tests/look.test.ts checks), and THEME_BG in look.ts
- * repeats each --bg for the browser bar.
+ * Each theme sets the same tokens (tests/look.test.ts checks), and THEME_GROUNDS in look.ts
+ * repeats each theme's grounds (--bg is the browser bar's color) and ACCENT_FILLS each fill.
  */
 
 /* ───────────── Dark themes ───────────── */
@@ -157,7 +157,8 @@
 /* ───────────── Accent colors ─────────────
    A fill for light themes (-l) and one for dark themes (-d), each with the text color on it
    (-ink-). Every pair is at least 4.5:1, and each fill reads at 4.5:1 as text on its family's
-   backgrounds, panels and tiles (tests/look.test.ts). */
+   backgrounds, panels, surfaces and tiles (tests/look.test.ts). On a Custom theme, look.ts
+   moves the fill only if it doesn't read there. */
 
 /* Lime: the app's original accent (the default) */
 :root,
@@ -243,11 +244,14 @@
 /* ───────────── The same in every theme ───────────── */
 
 :root {
-  /* Status colors are fixed across themes: green = trained, red = missed. */
+  /* Status colors mean the same in every theme: green = trained, red = missed. Light themes
+     use deeper shades of the same hues (below). */
   --good: #0ca30c;
   --bad: #d03b3b;
 
-  /* Chart series, colorblind-checked on both theme backgrounds (fixed order, never cycled). */
+  /* Chart series (fixed order, never cycled), colorblind-checked with the dataviz palette
+     validator: neighbors stay apart for protan and deutan vision. Light themes use the same
+     hues, darker (below). */
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
@@ -272,4 +276,22 @@
   --tabbar-h: 58px;
   --rail-w: 220px;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ───────────── Light themes: status and chart colors ─────────────
+   The same hues as above, deep enough for 3:1 on every light page, panel, surface and tile
+   (dots, check marks, chart lines), and --bad 4.5:1 as text. After the block above, which
+   sets the defaults on <html> with the same specificity. */
+
+[data-family="light"] {
+  --good: #0b930b;
+  --bad: #b53333;
+  --series-1: #3680d8;
+  --series-2: #bf4d20;
+  --series-3: #179066;
+  --series-4: #ad7200;
+  --series-5: #d35080;
+  --series-6: #0b930b;
+  --series-7: #7d74cb;
+  --series-8: #cc5b5b;
 }

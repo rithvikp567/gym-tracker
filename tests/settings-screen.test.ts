@@ -71,6 +71,12 @@ describe("Settings screen", () => {
     expect(html).toContain("--bg:#1e2a44");
   });
 
+  it("names a see-through Custom theme with its opacity, as the picker shows it", () => {
+    const services = makeServices();
+    services.settings.update({ theme: "custom", customThemeColor: "#0070197d" });
+    expect(render(services)).toContain("#007019 · 49%");
+  });
+
   it("no longer says where the look is saved", () => {
     for (const email of ["someone@example.com", null]) {
       const html = render(makeServices(email));

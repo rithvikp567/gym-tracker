@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { ACCENTS, THEMES, type Family } from "../src/services/SettingsService";
 import { applyLook } from "../src/ui/LookSync";
 import {
+  ACCENT_FILLS,
   ACCENT_TOKENS,
+  accentFillToken,
   contrast,
   customThemeTokens,
   familyOfColor,
@@ -14,8 +16,10 @@ import {
   luminance,
   over,
   parseColor,
+  readableAccent,
   resolveLook,
   THEME_BG,
+  THEME_GROUNDS,
   THEME_TOKENS,
   toHsva,
   type Look,
@@ -87,14 +91,24 @@ describe("tokens.css themes", () => {
     expect(tokens.get(":root")).toMatchObject(themeRule("oled"));
   });
 
-  it("keeps THEME_BG (the browser bar's color) in step with each theme's --bg", () => {
-    for (const t of THEMES) expect(THEME_BG[t.key], t.key).toBe(themeRule(t.key)["--bg"]);
-  });
-
-  it("keeps text readable on every theme's background, panels and tiles: 7:1, 4.5:1 and 3:1", () => {
+  it("keeps THEME_GROUNDS (and THEME_BG, the browser bar's color) in step with each theme's tokens", () => {
     for (const t of THEMES) {
       const rule = themeRule(t.key);
-      for (const ground of ["--bg", "--panel", "--tile", "--surface"]) {
+      expect(THEME_GROUNDS[t.key], t.key).toEqual({
+        bg: rule["--bg"],
+        panel: rule["--panel"],
+        surface: rule["--surface"],
+        surfaceRaised: rule["--surface-raised"],
+        tile: rule["--tile"],
+      });
+      expect(THEME_BG[t.key], t.key).toBe(rule["--bg"]);
+    }
+  });
+
+  it("keeps text readable on every theme's background, panels, surfaces and tiles: 7:1, 4.5:1 and 3:1", () => {
+    for (const t of THEMES) {
+      const rule = themeRule(t.key);
+      for (const ground of ["--bg", "--panel", "--tile", "--surface", "--surface-raised"]) {
         const g = color(rule[ground]!);
         expect(contrast(color(rule["--text"]!), g), `${t.key} text on ${ground}`).toBeGreaterThanOrEqual(7);
         expect(contrast(color(rule["--text-2"]!), g), `${t.key} text-2 on ${ground}`).toBeGreaterThanOrEqual(4.5);
@@ -111,7 +125,9 @@ describe("tokens.css themes", () => {
 describe("tokens.css accents", () => {
   const presets = ACCENTS.filter((a) => a.key !== "ink");
   const grounds = (family: Family) =>
-    THEMES.filter((t) => t.family === family).flatMap((t) => ["--bg", "--panel", "--tile"].map((g) => [`${t.key} ${g}`, themeRule(t.key)[g]!] as const));
+    THEMES.filter((t) => t.family === family).flatMap((t) =>
+      ["--bg", "--panel", "--tile", "--surface", "--surface-raised"].map((g) => [`${t.key} ${g}`, themeRule(t.key)[g]!] as const),
+    );
 
   it("gives every accent a fill and a text color for each family; Ink uses the theme's text and background", () => {
     for (const a of ACCENTS) expect(Object.keys(accentRule(a.key)).sort(), a.key).toEqual([...ACCENT_TOKENS].sort());
@@ -122,6 +138,13 @@ describe("tokens.css accents", () => {
     expect(accentRule("blue")["--accent-d"]).toBe("#7db7ff");
   });
 
+  it("keeps ACCENT_FILLS (what look.ts adjusts on a Custom theme) in step with tokens.css", () => {
+    for (const a of presets) {
+      const rule = accentRule(a.key);
+      expect(ACCENT_FILLS[a.key as keyof typeof ACCENT_FILLS], a.key).toEqual({ light: rule["--accent-l"], dark: rule["--accent-d"] });
+    }
+  });
+
   it("reads text on each fill at 4.5:1 or better", () => {
     for (const a of presets) {
       const rule = accentRule(a.key);
@@ -130,7 +153,7 @@ describe("tokens.css accents", () => {
     }
   });
 
-  it("reads each fill as text at 4.5:1 or better on its family's backgrounds, panels and tiles", () => {
+  it("reads each fill as text at 4.5:1 or better on its family's backgrounds, panels, surfaces and tiles", () => {
     for (const a of presets) {
       const rule = accentRule(a.key);
       for (const [name, ground] of grounds("light")) expect(contrast(color(rule["--accent-l"]!), color(ground)), `${a.key} on ${name}`).toBeGreaterThanOrEqual(4.5);
@@ -144,6 +167,36 @@ describe("tokens.css accents", () => {
     for (const family of ["dark", "light"]) {
       expect(Object.keys(tokens.get(`[data-family="${family}"]`)!)).toEqual(expect.arrayContaining(["--accent-soft", "--accent-line"]));
     }
+  });
+});
+
+describe("tokens.css status and chart colors", () => {
+  const MARKS = ["--good", ...Array.from({ length: 8 }, (_, i) => `--series-${i + 1}`)];
+  const lightRule = tokens.get('[data-family="light"]')!;
+  const value = (family: Family, name: string) => (family === "light" ? lightRule[name] : undefined) ?? tokens.get(":root")![name]!;
+  const grounds = (family: Family) =>
+    THEMES.filter((t) => t.family === family).flatMap((t) => ["--bg", "--panel", "--surface", "--tile"].map((g) => [`${t.key} ${g}`, themeRule(t.key)[g]!] as const));
+
+  it("reads dots, check marks and chart lines at 3:1 on every theme's page, panels, surfaces and tiles", () => {
+    for (const family of ["light", "dark"] as const)
+      for (const name of [...MARKS, "--bad"])
+        for (const [where, ground] of grounds(family)) {
+          expect(contrast(color(value(family, name)), color(ground)), `${name} on ${where}`).toBeGreaterThanOrEqual(3);
+        }
+  });
+
+  it("reads --bad as text (errors, Delete) at 4.5:1 on the light themes", () => {
+    for (const [where, ground] of grounds("light")) expect(contrast(color(value("light", "--bad")), color(ground)), where).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("gives light themes the same hues, only deeper, so an exercise keeps its color", () => {
+    for (const name of [...MARKS, "--bad"]) {
+      const [dark, light] = [color(value("dark", name)), color(value("light", name))];
+      expect(lightRule[name], name).toBeDefined();
+      expect(Math.abs(toHsva(light).h - toHsva(dark).h), name).toBeLessThan(2);
+      expect(luminance(light), name).toBeLessThan(luminance(dark));
+    }
+    expect(value("light", "--series-6")).toBe(value("light", "--good")); // as in dark themes
   });
 });
 
@@ -162,10 +215,12 @@ describe("a Custom theme", () => {
     }
   });
 
-  it("keeps text at 7:1, 4.5:1 and 3:1 on its background, panels and tiles, whatever the color", () => {
+  const GROUNDS = ["--bg", "--panel", "--surface", "--surface-raised", "--tile"] as const;
+
+  it("keeps text at 7:1, 4.5:1 and 3:1 on its background, panels, surfaces and tiles, whatever the color", () => {
     for (const picked of sweep) {
       const { tokens: t } = customThemeTokens(picked);
-      for (const ground of ["--bg", "--panel", "--tile"] as const) {
+      for (const ground of GROUNDS) {
         const g = color(t[ground]);
         expect(contrast(color(t["--text"]), g), `${picked} text on ${ground}`).toBeGreaterThanOrEqual(7);
         expect(contrast(color(t["--text-2"]), g), `${picked} text-2 on ${ground}`).toBeGreaterThanOrEqual(4.5);
@@ -190,15 +245,33 @@ describe("a Custom theme", () => {
     }
   });
 
-  it("shows a readable color as picked, and moves a hard one only as far as text needs", () => {
+  it("shows a color as picked whenever text can reach 7:1 on it, vivid ones included", () => {
     expect(customThemeTokens("#0b1a2e")).toMatchObject({ family: "dark", tokens: { "--bg": "#0b1a2e" } });
     expect(customThemeTokens("#fff3d6")).toMatchObject({ family: "light", tokens: { "--bg": "#fff3d6" } });
     expect(customThemeTokens("#ffffff").tokens["--bg"]).toBe("#ffffff");
     expect(customThemeTokens("#000000").tokens["--bg"]).toBe("#000000");
-    // Mid blue is too light for white text at 7:1: darkened, same hue.
-    const blue = color(customThemeTokens("#3b6fd4").tokens["--bg"]);
-    expect(luminance(blue)).toBeLessThan(luminance(color("#3b6fd4")));
-    expect(toHsva(blue).h).toBeCloseTo(toHsva(color("#3b6fd4")).h, -1);
+    // Black text already reads at 7:1 or more on these: no pastel.
+    for (const vivid of ["#ff8000", "#48a5f3", "#f59912", "#ffd60a", "#4fd1c5"]) expect(customThemeTokens(vivid).tokens["--bg"], vivid).toBe(vivid);
+  });
+
+  it("moves a hard color only as far as text needs, keeping its hue", () => {
+    // Plain white or black text, the furthest a text color goes, on every ground.
+    const worst = (t: Record<string, string>, family: Family) =>
+      Math.min(...GROUNDS.map((g) => contrast(color(family === "dark" ? "#ffffff" : "#000000"), color(t[g]!))));
+    let moved = 0;
+    for (const picked of sweep) {
+      const { family, tokens: t } = customThemeTokens(picked);
+      const blended = formatColor(over(color(picked), color(family === "dark" ? "#000000" : "#ffffff")));
+      if (t["--bg"] === blended) continue;
+      moved++;
+      expect(worst(t, family), picked).toBeLessThan(7.3); // just past 7:1, not further
+      const [from, to] = [toHsva(color(blended)), toHsva(color(t["--bg"]))];
+      if (from.s > 0.2 && to.s > 0.2) expect(Math.abs(((from.h - to.h + 540) % 360) - 180), picked).toBeLessThan(4);
+    }
+    expect(moved).toBeGreaterThan(50);
+    // Mid blue is too light for white text at 7:1: darkened. Pure red can't hold 7:1 either way: lightened.
+    expect(luminance(color(customThemeTokens("#3b6fd4").tokens["--bg"]))).toBeLessThan(luminance(color("#3b6fd4")));
+    expect(luminance(color(customThemeTokens("#ff0000").tokens["--bg"]))).toBeGreaterThan(luminance(color("#ff0000")));
   });
 
   it("blends a see-through color with its family's base: black for dark, white for light", () => {
@@ -212,6 +285,8 @@ describe("a Custom theme", () => {
 
 describe("the resolved look", () => {
   const base = { theme: "oled", customThemeColor: null, accent: "lime", customAccentColor: null } as const;
+  /** A Custom theme's grounds, from the tokens it sets. */
+  const GROUNDS_OF = (look: Look) => ["--bg", "--panel", "--surface", "--surface-raised", "--tile"].map((g) => look.vars[g]!);
 
   it("is plain ids for presets: tokens.css does the rest", () => {
     expect(resolveLook({ ...base, theme: "sand", accent: "teal" })).toEqual({ theme: "sand", accent: "teal", family: "light", bg: "#f3ecde", vars: {} });
@@ -224,12 +299,65 @@ describe("the resolved look", () => {
     expect(look.vars).toEqual(customThemeTokens("#fff3d6").tokens);
   });
 
-  it("gives a Custom accent black or white text, whichever reads better on it over the background", () => {
-    const light = resolveLook({ ...base, accent: "custom", customAccentColor: "#ffd60a" });
-    expect(light.vars).toEqual({ "--accent-l": "#ffd60a", "--accent-d": "#ffd60a", "--accent-ink-l": "#000000", "--accent-ink-d": "#000000" });
-    expect(resolveLook({ ...base, accent: "custom", customAccentColor: "#1d3b8f" }).vars["--accent-ink-d"]).toBe("#ffffff");
-    // Faint yellow over black looks dark: white text.
-    expect(resolveLook({ ...base, accent: "custom", customAccentColor: "#ffd60a33" }).vars["--accent-ink-d"]).toBe("#ffffff");
+  it("gives a Custom accent a fill per family, as picked wherever it reads, with black or white text on it", () => {
+    // Bright yellow reads on dark themes as it is; on light ones it's deepened, like Amber's two fills.
+    const yellow = resolveLook({ ...base, accent: "custom", customAccentColor: "#ffd60a" });
+    expect(yellow.vars).toMatchObject({ "--accent-d": "#ffd60a", "--accent-ink-d": "#000000", "--accent-ink-l": "#ffffff" });
+    const deep = color(yellow.vars["--accent-l"]!);
+    expect(luminance(deep)).toBeLessThan(luminance(color("#ffd60a")));
+    expect(toHsva(deep).h).toBeCloseTo(toHsva(color("#ffd60a")).h, 0);
+    // Picked on a light theme (Lime's light fill), it's lightened for dark ones instead.
+    const olive = resolveLook({ ...base, accent: "custom", customAccentColor: "#3f6a0a" });
+    expect(olive.vars["--accent-l"]).toBe("#3f6a0a");
+    expect(luminance(color(olive.vars["--accent-d"]!))).toBeGreaterThan(luminance(color("#3f6a0a")));
+    // Faint yellow over black looks dark: white text. It keeps its opacity.
+    const faint = resolveLook({ ...base, accent: "custom", customAccentColor: "#ffd60a33" });
+    expect(faint.vars["--accent-ink-d"]).toBe("#ffffff");
+    expect(color(faint.vars["--accent-d"]!).a).toBeCloseTo(0x33 / 255, 5);
+    expect(accentFillToken("light")).toBe("--accent-l");
+    expect(accentFillToken("dark")).toBe("--accent-d");
+  });
+
+  it("reads a Custom accent as text at 4.5:1 on every theme of each family, Custom themes included", () => {
+    const presetGrounds = (family: Family) => THEMES.filter((t) => t.family === family).flatMap((t) => Object.values(THEME_GROUNDS[t.key]));
+    for (let h = 0; h < 360; h += 30)
+      for (const v of [0.15, 0.45, 0.75, 1])
+        for (const theme of ["#ff8000", "#f3ecde", "#123456", "#2b2b2b", null]) {
+          const accent = formatColor(fromHsva({ h, s: 0.8, v, a: 1 }));
+          const look = resolveLook({ ...base, theme: theme ? "custom" : "oled", customThemeColor: theme, accent: "custom", customAccentColor: accent });
+          for (const family of ["light", "dark"] as const) {
+            const grounds = theme && look.family === family ? GROUNDS_OF(look) : presetGrounds(family);
+            const fill = color(look.vars[accentFillToken(family)]!);
+            for (const g of grounds) expect(contrast(fill, color(g)), `${accent} on ${theme ?? "presets"} (${family})`).toBeGreaterThanOrEqual(4.5);
+            expect(contrast(color(look.vars[`--accent-ink-${family === "light" ? "l" : "d"}`]!), fill)).toBeGreaterThanOrEqual(4.5);
+          }
+        }
+  });
+
+  it("keeps a preset accent on a Custom theme, moving it only where it wouldn't read", () => {
+    for (const theme of ["#ff8000", "#48a5f3", "#fff3d6", "#123456", "#3b6fd4", "#2b2b2b"])
+      for (const accent of Object.keys(ACCENT_FILLS) as (keyof typeof ACCENT_FILLS)[]) {
+        const look = resolveLook({ ...base, theme: "custom", customThemeColor: theme, accent });
+        const token = accentFillToken(look.family);
+        const fill = look.vars[token] ?? ACCENT_FILLS[accent][look.family];
+        for (const g of GROUNDS_OF(look)) expect(contrast(color(fill), color(g)), `${accent} on ${theme}`).toBeGreaterThanOrEqual(4.5);
+        // Only this family's fill is touched, and a moved fill gets its own text color.
+        expect(Object.keys(look.vars).filter((k) => k.startsWith("--accent")).sort()).toEqual(
+          look.vars[token] ? [token, `--accent-ink-${token.slice(-1)}`].sort() : [],
+        );
+      }
+    // Pale cream: Lime's light fill already reads, so tokens.css's fill and text stay.
+    expect(Object.keys(resolveLook({ ...base, theme: "custom", customThemeColor: "#fff3d6", accent: "lime" }).vars)).not.toContain("--accent-l");
+  });
+
+  it("moves a fill only as far as it must, and leaves one that reads alone", () => {
+    const black = [color("#000000")];
+    expect(readableAccent(color("#c6f432"), "dark", black)).toEqual(color("#c6f432"));
+    const lifted = readableAccent(color("#1d3b8f80"), "dark", black);
+    expect(lifted.a).toBeCloseTo(0x80 / 255, 5);
+    const ratio = contrast({ ...lifted, a: 1 }, black[0]!);
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+    expect(ratio).toBeLessThan(4.7);
   });
 
   it("always finds text at 4.5:1 or better on a custom accent", () => {

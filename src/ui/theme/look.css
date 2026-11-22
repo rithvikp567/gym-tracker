@@ -246,8 +246,9 @@
   );
 }
 
-/* Wide (a desktop panel): the six themes in one row with bigger pictures, and the swatches in
-   a row of their own size instead of spread across the whole width. */
+/* Wide (a desktop panel): the swatches in a row of their own size instead of spread across
+   the whole width; the themes stay three light over three dark, with bigger pictures, in a
+   grid no wider than it needs (centered under the swatches' row would look lost). */
 @container (min-width: 600px) {
   .accent-grid {
     grid-template-columns: repeat(9, 40px);
@@ -256,16 +257,17 @@
   }
 
   .theme-grid {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    max-width: 560px;
+    gap: 10px;
   }
 
   .theme-mini {
     height: 52px;
   }
 
-  /* One sixth of the tiles' row, the same sum as above: (C - 19px) / 6 less 12px. */
+  /* The same sum as above with 10px gaps: a tile above is (C + 1px) / 3 wide, its picture 12px narrower. */
   .theme-choice.is-custom .theme-mini {
-    flex-basis: calc(100% / 6 - 15.17px);
+    flex-basis: calc(100% / 3 - 11.67px);
   }
 }
 
@@ -295,6 +297,11 @@
 }
 
 /* ───────────── Color picker ───────────── */
+
+/* Only there to see where a press started (ColorPicker): no box of its own. */
+.cp-layer {
+  display: contents;
+}
 
 .cp {
   display: flex;

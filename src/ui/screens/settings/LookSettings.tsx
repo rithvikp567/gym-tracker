@@ -1,10 +1,10 @@
-import { useCallback, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { ACCENTS, THEMES, withRecentColor, type Settings } from "../../../services/SettingsService";
 import { Toggle } from "../../components/controls";
 import { previewLook } from "../../LookSync";
 import { useServices, useSettings } from "../../ServicesContext";
-import { customThemeTokens, formatColor, parseColor, resolveLook } from "../../theme/look";
+import { accentFillToken, customThemeTokens, formatColor, parseColor, resolveLook } from "../../theme/look";
 import { ColorPicker } from "./ColorPicker";
 
 type Paint = CSSProperties & Record<`--${string}`, string>;
@@ -27,6 +27,10 @@ export function LookSettings() {
   const accentName = current.accent === "custom" ? "Custom" : (ACCENTS.find((a) => a.key === current.accent)?.label ?? "");
   const themeName = current.theme === "custom" ? "Custom" : (THEMES.find((t) => t.key === current.theme)?.label ?? "");
   const custom = current.customThemeColor ? customThemeTokens(current.customThemeColor) : null;
+  // What the page shows for a pick (a theme's background may be deepened or lightened for
+  // readable text, an accent's fill for this family), for the swatches.
+  const themeShown = (color: string) => customThemeTokens(color).tokens["--bg"];
+  const accentShown = (color: string) => resolveLook({ ...current, accent: "custom", customAccentColor: color }).vars[accentFillToken(look.family)] ?? color;
 
   const preview = useCallback(
     (color: string) =>
@@ -37,6 +41,14 @@ export function LookSettings() {
     previewLook(null);
     setPicking(null);
   }, []);
+  // The preview lives only while the picker is open: leaving the screen with it open (Back,
+  // a swipe, another tab) puts the saved look back, and so does any route change.
+  useEffect(() => () => previewLook(null), []);
+  useEffect(() => {
+    if (!picking) return;
+    window.addEventListener("hashchange", close);
+    return () => window.removeEventListener("hashchange", close);
+  }, [picking, close]);
   const done = (color: string) => {
     // One update: the color, Custom picked, and the color at the front of the recent list.
     const changes: Partial<Settings> =
@@ -84,7 +96,7 @@ export function LookSettings() {
             title="Custom"
             onClick={() => setPicking("accent")}
           >
-            <span className="accent-dot" style={current.customAccentColor ? ({ "--swatch": current.customAccentColor } as Paint) : undefined} />
+            <span className="accent-dot" style={current.customAccentColor ? ({ "--swatch": accentShown(current.customAccentColor) } as Paint) : undefined} />
           </button>
         </div>
       </div>
@@ -134,7 +146,7 @@ export function LookSettings() {
             </span>
             <span className="theme-name">Custom</span>
             <span className="theme-hint num" aria-hidden="true">
-              {current.customThemeColor ? current.customThemeColor.slice(0, 7).toUpperCase() : "Any color"}
+              {current.customThemeColor ? colorName(current.customThemeColor) : "Any color"}
             </span>
           </button>
         </div>
@@ -156,6 +168,7 @@ export function LookSettings() {
             initial={picking === "theme" ? (current.customThemeColor ?? look.bg) : (current.customAccentColor ?? shownAccent(look.bg))}
             recent={picking === "theme" ? current.recentThemeColors : current.recentAccentColors}
             minAlpha={picking === "theme" ? 0 : 0.2}
+            shows={picking === "theme" ? themeShown : accentShown}
             onPreview={preview}
             onDone={done}
             onCancel={close}
@@ -164,6 +177,13 @@ export function LookSettings() {
         )}
     </div>
   );
+}
+
+/** A picked color as the picker's fields show it: hex, and the opacity when it's see-through. */
+function colorName(color: string): string {
+  const opacity = Math.round((parseColor(color)?.a ?? 1) * 100);
+  const hex = color.slice(0, 7).toUpperCase();
+  return opacity < 100 ? `${hex} · ${opacity}%` : hex;
 }
 
 /** The accent on screen now (a preset's fill for this family), to start the picker from. */

@@ -16,6 +16,7 @@ export function ColorPicker({
   initial,
   recent,
   minAlpha,
+  shows,
   onPreview,
   onDone,
   onCancel,
@@ -27,6 +28,8 @@ export function ColorPicker({
   recent: readonly string[];
   /** The lowest opacity allowed, 0–1 (an accent you can't see would hide every button). */
   minAlpha: number;
+  /** The color the page shows for a pick (a theme's background, an accent's fill), for the before / after swatches. */
+  shows: (color: string) => string;
   onPreview: (color: string) => void;
   onDone: (color: string) => void;
   onCancel: () => void;
@@ -56,82 +59,95 @@ export function ColorPicker({
 
   const cancel = useCallback(() => onCancel(), [onCancel]);
 
+  // A tap outside cancels. A press that starts inside and is let go outside (selecting the hex
+  // text past the edge) also ends in a click on the backdrop; that one doesn't.
+  const pressedInside = useRef(false);
+  const inDialog = (target: EventTarget) => (target as Element).closest?.('[role="dialog"]') != null;
+
   return (
-    <Sheet title={title} onClose={cancel}>
-      <div className="cp">
-        <Wheel ref={wheel} hsva={hsva} opaque={opaque} onChange={change} />
+    <div
+      className="cp-layer"
+      onPointerDownCapture={(e) => (pressedInside.current = inDialog(e.target))}
+      onClickCapture={(e) => {
+        if (pressedInside.current && !inDialog(e.target)) e.stopPropagation();
+      }}
+    >
+      <Sheet title={title} onClose={cancel}>
+        <div className="cp">
+          <Wheel ref={wheel} hsva={hsva} opaque={opaque} onChange={change} />
 
-        <div className="cp-sliders">
-          <label className="cp-row">
-            <span className="cp-label">Brightness</span>
-            <span className="cp-track" style={{ "--track": `linear-gradient(to right, ${formatColor(fromHsva({ ...hsva, v: 0, a: 1 }))}, ${formatColor(fromHsva({ ...hsva, v: 1, a: 1 }))})` } as Paint}>
-              <input
-                type="range"
-                className="cp-range"
-                min={0}
-                max={100}
-                value={Math.round(hsva.v * 100)}
-                onChange={(e) => change({ v: Number(e.target.value) / 100 })}
-                style={{ "--thumb": opaque } as Paint}
-              />
-            </span>
-            <span className="cp-num num">{Math.round(hsva.v * 100)}%</span>
-          </label>
-          <label className="cp-row">
-            <span className="cp-label">Opacity</span>
-            <span className="cp-track is-alpha" style={{ "--track": `linear-gradient(to right, ${formatColor({ ...fromHsva(hsva), a: 0 })}, ${opaque})` } as Paint}>
-              <input
-                type="range"
-                className="cp-range"
-                min={Math.round(minAlpha * 100)}
-                max={100}
-                value={Math.round(hsva.a * 100)}
-                onChange={(e) => change({ a: Number(e.target.value) / 100 })}
-                style={{ "--thumb": color } as Paint}
-              />
-            </span>
-            <span className="cp-num num">{Math.round(hsva.a * 100)}%</span>
-          </label>
-        </div>
-
-        <div className="cp-values">
-          <span className="cp-compare" aria-hidden="true">
-            <span style={{ "--swatch": normalized(initial) } as Paint} />
-            <span style={{ "--swatch": color } as Paint} />
-          </span>
-          <HexField color={color} onChange={(c) => change(toHsva(c, hsva.h))} keepAlpha={hsva.a} minAlpha={minAlpha} />
-        </div>
-
-        {recent.length > 0 && (
-          <div className="cp-recent">
-            <span className="cp-label">Recent</span>
-            <div className="cp-recent-list" role="group" aria-label="Recent colors">
-              {recent.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  className="cp-recent-color"
-                  aria-label={`Use ${c.toUpperCase()}`}
-                  title={c.toUpperCase()}
-                  aria-pressed={c === color}
-                  style={{ "--swatch": c } as Paint}
-                  onClick={() => change(start(c, minAlpha))}
+          <div className="cp-sliders">
+            <label className="cp-row">
+              <span className="cp-label">Brightness</span>
+              <span className="cp-track" style={{ "--track": `linear-gradient(to right, ${formatColor(fromHsva({ ...hsva, v: 0, a: 1 }))}, ${formatColor(fromHsva({ ...hsva, v: 1, a: 1 }))})` } as Paint}>
+                <input
+                  type="range"
+                  className="cp-range"
+                  min={0}
+                  max={100}
+                  value={Math.round(hsva.v * 100)}
+                  onChange={(e) => change({ v: Number(e.target.value) / 100 })}
+                  style={{ "--thumb": opaque } as Paint}
                 />
-              ))}
-            </div>
+              </span>
+              <span className="cp-num num">{Math.round(hsva.v * 100)}%</span>
+            </label>
+            <label className="cp-row">
+              <span className="cp-label">Opacity</span>
+              <span className="cp-track is-alpha" style={{ "--track": `linear-gradient(to right, ${formatColor({ ...fromHsva(hsva), a: 0 })}, ${opaque})` } as Paint}>
+                <input
+                  type="range"
+                  className="cp-range"
+                  min={Math.round(minAlpha * 100)}
+                  max={100}
+                  value={Math.round(hsva.a * 100)}
+                  onChange={(e) => change({ a: Number(e.target.value) / 100 })}
+                  style={{ "--thumb": color } as Paint}
+                />
+              </span>
+              <span className="cp-num num">{Math.round(hsva.a * 100)}%</span>
+            </label>
           </div>
-        )}
 
-        <div className="cp-actions">
-          <button type="button" className="btn" onClick={cancel}>
-            Cancel
-          </button>
-          <button type="button" className="btn primary" onClick={() => onDone(color)}>
-            Done
-          </button>
+          <div className="cp-values">
+            <span className="cp-compare" aria-hidden="true">
+              <span style={{ "--swatch": shows(initial) } as Paint} />
+              <span style={{ "--swatch": shows(color) } as Paint} />
+            </span>
+            <HexField color={color} onChange={(c) => change(toHsva(c, hsva.h))} keepAlpha={hsva.a} minAlpha={minAlpha} />
+          </div>
+
+          {recent.length > 0 && (
+            <div className="cp-recent">
+              <span className="cp-label">Recent</span>
+              <div className="cp-recent-list" role="group" aria-label="Recent colors">
+                {recent.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className="cp-recent-color"
+                    aria-label={`Use ${c.toUpperCase()}`}
+                    title={c.toUpperCase()}
+                    aria-pressed={c === color}
+                    style={{ "--swatch": c } as Paint}
+                    onClick={() => change(start(c, minAlpha))}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="cp-actions">
+            <button type="button" className="btn" onClick={cancel}>
+              Cancel
+            </button>
+            <button type="button" className="btn primary" onClick={() => onDone(color)}>
+              Done
+            </button>
+          </div>
         </div>
-      </div>
-    </Sheet>
+      </Sheet>
+    </div>
   );
 }
 
@@ -140,11 +156,6 @@ function start(color: string, minAlpha: number): Hsva {
   const parsed = parseColor(color);
   const c = parsed ? toHsva(parsed) : { h: 0, s: 0, v: 0.5, a: 1 }; // (callers pass stored colors; mid gray if not)
   return { ...c, a: Math.max(minAlpha, c.a) };
-}
-
-function normalized(color: string): string {
-  const c = parseColor(color);
-  return c ? formatColor(c) : color;
 }
 
 /**
