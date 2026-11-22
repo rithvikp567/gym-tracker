@@ -63,8 +63,9 @@ export function HomeScreen() {
   const dayName = (id: string | null) => workoutDays.find((d) => d.id === id)?.name ?? "";
   // The header and strip come from the dates alone (D26), so nothing waits for the week to load.
   const dates = Array.from({ length: 7 }, (_, i) => weekStart.addDays(i));
-  // The rows keep the last loaded week until this one lands. A week step keeps the weekday, so
-  // the plan still matches; the checks catch up when the week arrives.
+  // The rows keep the week last on screen (even one that came from the cache) until this one
+  // lands. A week step keeps the weekday, so the plan still matches; the checks catch up when
+  // the week arrives.
   const rowsDay = (thisWeek ?? week.previous)?.find((d) => d.date.weekday() === picked.weekday());
 
   return (

@@ -1,8 +1,12 @@
+import { useEffect, useState } from "react";
 import type { LocalDate } from "../../domain/LocalDate";
 import type { Session } from "../../domain/Session";
 import type { WorkoutDay } from "../../domain/WorkoutDay";
 import { href } from "../router";
 import { Icon } from "./Icon";
+
+/** How long busy rows look as usual before they're marked stale, so a quick load never flickers. */
+const STALE_AFTER_MS = 150;
 
 /**
  * Every workout day as a row for one date (Home, a rest day): name, "Planned", how many
@@ -23,11 +27,17 @@ export function WorkoutRows({
   sessions: readonly Session[];
   /** When each workout day was last done; undefined while that's still loading. */
   lastDone: ReadonlyMap<string, LocalDate> | undefined;
-  /** The plan and checks are from older data while newer loads (Home dims them if it takes a moment). */
+  /**
+   * The plan and checks are from older data while newer loads: aria-busy at once, and
+   * data-stale once it has taken a moment (Home dims them then).
+   */
   busy?: boolean;
 }) {
+  // A timer rather than a CSS animation delay: Reduce Motion turns animations off, and the
+  // dimming would go with them.
+  const stale = useLasting(busy, STALE_AFTER_MS);
   return (
-    <div className="list" aria-busy={busy || undefined}>
+    <div className="list" aria-busy={busy || undefined} data-stale={stale || undefined}>
       {days.map((day) => (
         <DayRow
           key={day.id}
@@ -40,6 +50,20 @@ export function WorkoutRows({
       ))}
     </div>
   );
+}
+
+/** True once `on` has stayed true for `ms`; false again as soon as it turns false. */
+function useLasting(on: boolean, ms: number): boolean {
+  const [lasted, setLasted] = useState(false);
+  useEffect(() => {
+    if (!on) return;
+    const timer = setTimeout(() => setLasted(true), ms);
+    return () => {
+      clearTimeout(timer);
+      setLasted(false);
+    };
+  }, [on, ms]);
+  return on && lasted;
 }
 
 function DayRow({

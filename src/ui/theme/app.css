@@ -583,14 +583,12 @@ a.list-row:hover {
   visibility: hidden;
 }
 
-/* Rows still showing the last loaded week while the picked one loads: marked busy at once,
-   dimmed only if it takes a moment, so fast loads never flicker. */
-.home .list[aria-busy="true"] {
-  animation: stale-dim 0.2s ease-out 0.15s forwards;
-}
-
-@keyframes stale-dim {
-  to { opacity: 0.45; }
+/* Rows still showing the last week on screen while the picked one loads: aria-busy at once,
+   data-stale (set by WorkoutRows after 150 ms) dims them, so fast loads never flicker. Not an
+   animation: Reduce Motion turns those off, and only the fade should go then, not the dimming. */
+.home .list[data-stale] {
+  opacity: 0.45;
+  transition: opacity 0.2s ease-out;
 }
 
 .week-nav {

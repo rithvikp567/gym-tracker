@@ -93,7 +93,10 @@ export interface Live<T> {
    * an empty state that's showing doesn't blink.)
    */
   fresh: boolean;
-  /** What this screen last loaded for other deps (e.g. the week before), to keep showing while `value` loads. */
+  /**
+   * What this screen last showed for other deps (its own load or a cached copy, e.g. the week
+   * before), to keep showing while `value` loads.
+   */
   previous: T | undefined;
 }
 
@@ -110,6 +113,7 @@ export function useLiveState<T>(load: () => Promise<T>, deps: readonly unknown[]
   const cache = liveCacheFor(changes);
   const key = JSON.stringify(deps);
   const cacheKey = cacheAs ? liveKey(cacheAs, deps) : null;
+  // The value on screen: this screen's own load, or a cached copy it showed.
   const [state, setState] = useState<{ key: string; value: T; fresh: boolean } | null>(() => {
     const hit = cacheKey ? cache.read(cacheKey) : undefined;
     return hit ? { key, value: hit.value as T, fresh: hit.fresh } : null;
@@ -142,9 +146,15 @@ export function useLiveState<T>(load: () => Promise<T>, deps: readonly unknown[]
   }, [key, cacheKey, changes, cache]);
 
   if (state && state.key === key) return { value: state.value, fresh: state.fresh, previous: undefined };
-  // New deps (another year, another day): show their cached copy, if any, until the load lands.
+  // New deps (another year, another week): show their cached copy, if any, until the load lands.
   const hit = cacheKey ? cache.read(cacheKey) : undefined;
-  return { value: hit?.value as T | undefined, fresh: hit?.fresh ?? false, previous: state?.value };
+  if (hit) {
+    // Kept as what's on screen (React re-renders at once), so if the deps move on again before
+    // this copy reloads, `previous` is this copy and not an older one.
+    setState({ key, value: hit.value as T, fresh: hit.fresh });
+    return { value: hit.value as T, fresh: hit.fresh, previous: undefined };
+  }
+  return { value: undefined, fresh: false, previous: state?.value };
 }
 
 /** `useLiveState` for screens that only need the value. */
