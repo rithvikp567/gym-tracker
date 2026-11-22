@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dev-dist/
+.env.local
+.env.*.local
+*.log
+.DS_Store
+# Real workout exports stay on your machine
+*.xlsx

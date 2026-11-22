@@ -1,0 +1,74 @@
+/*
+ * Design tokens. Every color, radius, and spacing the UI uses comes from here, so a theme
+ * is just a different set of values (and user-picked colors later are a token override).
+ *
+ *   oled      – true black, hairline dividers, lime accent   (default)
+ *   graphite  – charcoal, raised rounded cards, blue accent
+ */
+:root,
+:root[data-theme="oled"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --surface: #0e0e0f;
+  --surface-raised: #18181a;
+  --row-bg: transparent;
+  --row-radius: 0px;
+  --row-gap: 0px;
+  --row-pad-x: 2px;
+  --row-divider: #1d1d1f;
+  --hairline: #232325;
+  --hairline-strong: #36363a;
+  --text: #f2f2f2;
+  --text-2: #9b9ba0;
+  --text-3: #6f6f75;
+  --accent: #c6f432;
+  --accent-ink: #0d1200;
+  --accent-soft: rgba(198, 244, 50, 0.12);
+  --chart-grid: #1f1f21;
+  --chart-axis: #6f6f75;
+}
+
+:root[data-theme="graphite"] {
+  --bg: #121214;
+  --surface: #1c1c20;
+  --surface-raised: #26262b;
+  --row-bg: #1c1c20;
+  --row-radius: 14px;
+  --row-gap: 8px;
+  --row-pad-x: 14px;
+  --row-divider: transparent;
+  --hairline: #2a2a2f;
+  --hairline-strong: #3c3c42;
+  --text: #ededf0;
+  --text-2: #a3a3ab;
+  --text-3: #76767e;
+  --accent: #7db7ff;
+  --accent-ink: #00152e;
+  --accent-soft: rgba(125, 183, 255, 0.14);
+  --chart-grid: #2a2a2f;
+  --chart-axis: #76767e;
+}
+
+:root {
+  /* Status colors are fixed across themes: green = trained, red = missed. */
+  --good: #0ca30c;
+  --bad: #d03b3b;
+
+  /* Chart series, colorblind-checked on both theme backgrounds (fixed order, never cycled). */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #0ca30c;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --series-other: #6f6f75;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --gutter: 16px;
+  --tabbar-h: 58px;
+  --rail-w: 220px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+}
