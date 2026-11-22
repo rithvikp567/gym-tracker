@@ -240,18 +240,11 @@
   );
 }
 
-/* Wide (a desktop panel): the swatches in a row of their own size instead of spread across
-   the whole width; the themes stay three light over three dark, with bigger pictures, in a
-   grid no wider than it needs (centered under the swatches' row would look lost). */
+/* Wide (a desktop panel): as on a phone (and in the reference), the swatches spread across the
+   card and the themes take its whole width, so the names on the right of each header sit over
+   the last swatch and the last column; only the pictures grow. */
 @container (min-width: 600px) {
-  .accent-grid {
-    grid-template-columns: repeat(9, 40px);
-    justify-content: start;
-    gap: 14px;
-  }
-
   .theme-grid {
-    max-width: 560px;
     gap: 10px;
   }
 

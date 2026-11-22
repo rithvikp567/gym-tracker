@@ -22,13 +22,16 @@ export function SetupScreen({ openDayId }: { openDayId?: string | undefined }) {
   const data = useLive(async () => ({ days: await setup.days(), split: await setup.split() }), [], "setup");
   const [newDay, setNewDay] = useState("");
   const [openIds, setOpenIds] = useState<ReadonlySet<string>>(() => new Set(openDayId ? [openDayId] : []));
-  // Whether you have opened, closed or added a day here (the day Progress → Edit opened doesn't count).
+  // Whether you have done anything here yet: opened, closed or added a day, or pressed or typed
+  // anywhere in the cards (the day Progress → Edit opened, just shown, doesn't count).
   const [touched, setTouched] = useState(false);
-  // The page is centered: while a day is open it holds its place, so the card you tapped stays put
-  // as it grows. Only once you've tapped: the day the route opened is scrolled into view instead,
-  // and a hold starting as the page first draws would keep the offset of the "Loading…"
-  // placeholder (a band of empty panel above the title). Only days that still exist count, so
-  // deleting the open day lets go.
+  const touch = () => setTouched(true);
+  // The page is centered: while a day is open it holds its place, so the card you're editing stays
+  // put as it grows or shrinks (an exercise added or removed). Only once you've touched it: the
+  // day the route opened is scrolled into view instead, and a hold starting as the page first
+  // draws would keep the offset of the "Loading…" placeholder (a band of empty panel above the
+  // title). The press or key comes before the edit it leads to, so the hold is in place before
+  // the card changes size. Only days that still exist count, so deleting the open day lets go.
   usePageHold(touched && Boolean(data?.days.some((d) => openIds.has(d.id))));
 
   // Coming from another screen to edit one day: bring its card into view.
@@ -66,7 +69,7 @@ export function SetupScreen({ openDayId }: { openDayId?: string | undefined }) {
         actions={<BackLink fallback={{ name: "settings" }}>Done</BackLink>}
       />
 
-      <div className="day-cards">
+      <div className="day-cards" onPointerDownCapture={touch} onKeyDownCapture={touch}>
         {data.days.map((day, i) => (
           <DayCard
             key={day.id}

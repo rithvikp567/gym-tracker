@@ -74,6 +74,66 @@ export const ACCENT_FILLS: Record<Exclude<AccentId, "ink">, Record<Family, strin
 /** How well the accent reads as text (links, numbers, today's date) on every ground. */
 export const ACCENT_TEXT = 4.5;
 
+/**
+ * How much of the accent --accent-soft lays over what's under it, per family (tokens.css is the
+ * source; tests check they match). The accent is also text on that tint over a tile (today's
+ * date on the picked day, the past-day banner's link), so a Custom look counts it as a ground.
+ */
+export const ACCENT_SOFT: Record<Family, number> = { light: 0.12, dark: 0.14 };
+
+/** Status and chart colors: the same hues in every theme, deeper in light ones (tokens.css). */
+export const MARK_TOKENS = [
+  "--good",
+  "--bad",
+  "--series-1",
+  "--series-2",
+  "--series-3",
+  "--series-4",
+  "--series-5",
+  "--series-6",
+  "--series-7",
+  "--series-8",
+  "--series-other",
+] as const;
+type MarkToken = (typeof MARK_TOKENS)[number];
+
+/**
+ * Each family's status and chart colors (tokens.css is the source; tests check they match). A
+ * Custom theme starts from its family's and moves one only if it wouldn't show on its grounds.
+ */
+export const MARK_COLORS: Record<Family, Record<MarkToken, string>> = {
+  dark: {
+    "--good": "#0ca30c",
+    "--bad": "#e35f5f",
+    "--series-1": "#3987e5",
+    "--series-2": "#d95926",
+    "--series-3": "#199e70",
+    "--series-4": "#c98500",
+    "--series-5": "#d55181",
+    "--series-6": "#0ca30c",
+    "--series-7": "#9085e9",
+    "--series-8": "#e66767",
+    "--series-other": "#6f6f75",
+  },
+  light: {
+    "--good": "#0b930b",
+    "--bad": "#b53333",
+    "--series-1": "#3680d8",
+    "--series-2": "#bf4d20",
+    "--series-3": "#179066",
+    "--series-4": "#ad7200",
+    "--series-5": "#d35080",
+    "--series-6": "#0b930b",
+    "--series-7": "#7d74cb",
+    "--series-8": "#cc5b5b",
+    "--series-other": "#6f6f75",
+  },
+};
+
+/** Dots, check marks and chart lines show at 3:1; --bad is also text (Delete, errors), so 4.5:1. */
+export const MARK_RATIO = 3;
+export const BAD_TEXT = 4.5;
+
 /** The tokens every theme sets (tokens.css), which a Custom theme sets on <html> instead. */
 export const THEME_TOKENS = [
   "--bg",
@@ -98,12 +158,23 @@ export const THEME_TOKENS = [
 
 /**
  * What a Custom accent sets on <html>, for both families: its fill (as picked), the text on it,
- * and the accent as text where the fill itself wouldn't read (--accent-text-*).
+ * the accent as text where the fill itself wouldn't read (--accent-text-*), and, for a
+ * see-through one, the fill without its opacity (--accent-solid-*), which the tints, lines and
+ * focus borders are made from so they still show.
  */
-export const ACCENT_TOKENS = ["--accent-l", "--accent-d", "--accent-ink-l", "--accent-ink-d", "--accent-text-l", "--accent-text-d"] as const;
+export const ACCENT_TOKENS = [
+  "--accent-l",
+  "--accent-d",
+  "--accent-ink-l",
+  "--accent-ink-d",
+  "--accent-text-l",
+  "--accent-text-d",
+  "--accent-solid-l",
+  "--accent-solid-d",
+] as const;
 
 /** Every custom property LookSync may set, so it can clear the ones a new look doesn't use. */
-export const LOOK_TOKENS: readonly string[] = [...THEME_TOKENS, ...ACCENT_TOKENS];
+export const LOOK_TOKENS: readonly string[] = [...THEME_TOKENS, ...MARK_TOKENS, ...ACCENT_TOKENS];
 
 // ───────────── Hex colors ─────────────
 
@@ -204,8 +275,10 @@ export function familyOfColor(color: Rgba): Family {
  * what's laid over it; panels, tiles and lines step from it toward white in dark themes and
  * toward black in light ones (cards in a light theme are lighter than the page, like the
  * presets); the three text colors keep at least 7:1, 4.5:1 and 3:1 on all of those grounds.
+ * The status and chart colors are the family's, each lightened (dark) or deepened (light) only
+ * as far as it takes to show at 3:1 on the page, panels, surfaces and tiles (--bad 4.5:1).
  */
-export function customThemeTokens(color: string): { family: Family; tokens: Record<(typeof THEME_TOKENS)[number], string> } {
+export function customThemeTokens(color: string): { family: Family; tokens: Record<(typeof THEME_TOKENS)[number] | MarkToken, string> } {
   const picked = parseColor(color) ?? BLACK;
   const family = familyOfColor(picked);
   const dark = family === "dark";
@@ -214,6 +287,14 @@ export function customThemeTokens(color: string): { family: Family; tokens: Reco
   const g = laidOver(bg, family);
   const grounds = [bg, g.panel, g.surface, g.surfaceRaised, g.tile];
   const text3 = textColor(bg, family, grounds, 0.38, TEXT_RATIOS[2]);
+  // Where dots, check marks, chart lines and Delete sit (as the presets' tests check them).
+  const markGrounds = [bg, g.panel, g.surface, g.tile];
+  const marks = Object.fromEntries(
+    MARK_TOKENS.map((name) => {
+      const ratio = name === "--bad" ? BAD_TEXT : MARK_RATIO;
+      return [name, formatColor(movedToRead(parseColor(MARK_COLORS[family][name])!, family, markGrounds, ratio))];
+    }),
+  ) as Record<MarkToken, string>;
   return {
     family,
     tokens: {
@@ -235,6 +316,7 @@ export function customThemeTokens(color: string): { family: Family; tokens: Reco
       "--text-3": text3,
       "--chart-grid": formatColor(toward(dark ? 0.1 : 0.07)),
       "--chart-axis": text3,
+      ...marks,
     },
   };
 }
@@ -298,17 +380,27 @@ function rounded(c: Rgba): Rgba {
  * opacity.
  */
 export function readableAccent(fill: Rgba, family: Family, grounds: readonly Rgba[]): Rgba {
+  return movedToRead(fill, family, grounds, ACCENT_TEXT);
+}
+
+/**
+ * `color` when it reaches `ratio` on every ground, else lightened (dark family) or darkened
+ * (light) just that far, keeping its hue. Checked as if opaque; a see-through color keeps its
+ * opacity. Plain white (dark) or black (light) always gets there: a theme's grounds keep text at
+ * 7:1 against it.
+ */
+function movedToRead(color: Rgba, family: Family, grounds: readonly Rgba[], ratio: number): Rgba {
   const end = family === "dark" ? WHITE : BLACK;
-  const opaque = rounded({ ...fill, a: 1 });
-  const reads = (c: Rgba) => grounds.every((g) => contrast(c, g) >= ACCENT_TEXT);
-  if (reads(opaque)) return fill;
+  const opaque = rounded({ ...color, a: 1 });
+  const reads = (c: Rgba) => grounds.every((g) => contrast(c, g) >= ratio);
+  if (reads(opaque)) return color;
   let [lo, hi] = [0, 1]; // share of the end mixed in: hi always reads (plain white or black)
   for (let i = 0; i < 24; i++) {
     const mid = (lo + hi) / 2;
     if (reads(rounded(mix(opaque, end, mid)))) hi = mid;
     else lo = mid;
   }
-  return { ...rounded(mix(opaque, end, hi)), a: fill.a };
+  return { ...rounded(mix(opaque, end, hi)), a: color.a };
 }
 
 // ───────────── The whole look ─────────────
@@ -338,6 +430,7 @@ export function resolveLook(s: LookSettings): Look {
   const vars: Record<string, string> = {};
   // Per family: where the accent must read, and what a see-through accent shows over.
   const grounds: Record<Family, Rgba[]> = { light: presetGrounds("light"), dark: presetGrounds("dark") };
+  const tiles: Record<Family, Rgba[]> = { light: presetTiles("light"), dark: presetTiles("dark") };
   const behind: Record<Family, Rgba> = { light: parseColor(THEME_BG.light)!, dark: parseColor(THEME_BG.oled)! };
   let family: Family;
   let bg: string;
@@ -348,6 +441,7 @@ export function resolveLook(s: LookSettings): Look {
     bg = t["--bg"];
     Object.assign(vars, t);
     grounds[family] = [t["--bg"], t["--panel"], t["--surface"], t["--surface-raised"], t["--tile"]].map((c) => parseColor(c)!);
+    tiles[family] = [parseColor(t["--tile"])!];
   } else {
     const preset = THEMES.find((t) => t.key === s.theme) ?? THEMES.find((t) => t.key === "oled")!;
     family = preset.family;
@@ -355,11 +449,13 @@ export function resolveLook(s: LookSettings): Look {
   }
   behind[family] = parseColor(bg)!;
 
-  // Where the accent is text (links, today's date, numbers) it must read at 4.5:1; where it is a
-  // fill (buttons, switches, the picked tab) it stays the color as picked, with black or white
-  // text on it. So only the text color moves, and only when the fill wouldn't read as text.
+  // Where the accent is text (links, today's date, numbers) it must read at 4.5:1, also on its
+  // own tint over a tile (--accent-soft: the picked day, the past-day banner); where it is a fill
+  // (buttons, switches) it stays the color as picked, with black or white text on it. So only
+  // the text color moves, and only when the fill wouldn't read as text.
   const setText = (f: Family, fill: Rgba) => {
-    const text = readableAccent({ ...over(fill, behind[f]), a: 1 }, f, grounds[f]);
+    const tints = tiles[f].map((tile) => mix(tile, { ...fill, a: 1 }, ACCENT_SOFT[f]));
+    const text = readableAccent({ ...over(fill, behind[f]), a: 1 }, f, [...grounds[f], ...tints]);
     if (formatColor(text) !== formatColor({ ...fill, a: 1 }) || fill.a < 1) vars[`--accent-text-${slot(f)}`] = formatColor(text);
   };
   const custom = s.accent === "custom" && s.customAccentColor ? parseColor(s.customAccentColor) : null;
@@ -367,6 +463,8 @@ export function resolveLook(s: LookSettings): Look {
     for (const f of FAMILIES) {
       vars[`--accent-${slot(f)}`] = formatColor(custom);
       vars[`--accent-ink-${slot(f)}`] = inkOn(custom, behind[f]);
+      // See-through: tints, lines and focus borders from the color itself, so they still show.
+      if (custom.a < 1) vars[`--accent-solid-${slot(f)}`] = formatColor({ ...custom, a: 1 });
       setText(f, custom);
     }
   } else if (customTheme && s.accent !== "ink" && s.accent !== "custom") {
@@ -379,6 +477,11 @@ export function resolveLook(s: LookSettings): Look {
 /** Every ground of the preset themes in `family`. */
 function presetGrounds(family: Family): Rgba[] {
   return THEMES.filter((t) => t.family === family).flatMap((t) => Object.values(THEME_GROUNDS[t.key]).map((c) => parseColor(c)!));
+}
+
+/** The tiles of the preset themes in `family`. */
+function presetTiles(family: Family): Rgba[] {
+  return THEMES.filter((t) => t.family === family).map((t) => parseColor(THEME_GROUNDS[t.key].tile)!);
 }
 
 /** The same look (for skipping work when nothing changed). */

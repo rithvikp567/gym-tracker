@@ -12,9 +12,18 @@ import { LOOK_KEY, LOOK_TOKENS, resolveLook, type Look, type LookSettings } from
 let preview: Partial<LookSettings> | null = null;
 const previews = new Emitter<Partial<LookSettings> | null>();
 
-/** Shows `changes` over the saved look on this device, or clears the preview with null. */
+/**
+ * Shows `changes` over the saved look on this device, or clears the preview with null. While a
+ * preview shows, <html> carries data-look-preview, which turns off color transitions
+ * (base.css): the page follows the wheel at once instead of easing 120–220 ms behind it.
+ */
 export function previewLook(changes: Partial<LookSettings> | null): void {
   preview = changes;
+  if (typeof document !== "undefined") {
+    const root = document.documentElement;
+    if (changes) root.setAttribute("data-look-preview", "");
+    else root.removeAttribute("data-look-preview");
+  }
   previews.emit(changes);
 }
 

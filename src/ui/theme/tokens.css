@@ -222,7 +222,11 @@
 
 /* ───────────── Families: what the accent drives ─────────────
    Declared with data-family so each preview (and <html>) works them out from its own theme
-   and accent: custom properties resolve where they're declared, then inherit as values. */
+   and accent: custom properties resolve where they're declared, then inherit as values.
+   --accent is the fill (buttons, switches); --accent-text the accent as text; --accent-solid the
+   fill without a Custom accent's see-through part, which the tint (--accent-soft: the picked
+   choice, the current tab), the lines and focus borders are made from, so they show at any
+   opacity. look.ts's ACCENT_SOFT repeats the tint's share. */
 
 :root,
 [data-family="dark"] {
@@ -230,8 +234,9 @@
   --accent: var(--accent-d, var(--text));
   --accent-ink: var(--accent-ink-d, var(--bg));
   --accent-text: var(--accent-text-d, var(--accent));
-  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
-  --accent-line: color-mix(in srgb, var(--accent) 35%, var(--tile-line));
+  --accent-solid: var(--accent-solid-d, var(--accent));
+  --accent-soft: color-mix(in srgb, var(--accent-solid) 14%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent-solid) 35%, var(--tile-line));
 }
 
 [data-family="light"] {
@@ -239,21 +244,24 @@
   --accent: var(--accent-l, var(--text));
   --accent-ink: var(--accent-ink-l, var(--bg));
   --accent-text: var(--accent-text-l, var(--accent));
-  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
-  --accent-line: color-mix(in srgb, var(--accent) 35%, var(--tile-line));
+  --accent-solid: var(--accent-solid-l, var(--accent));
+  --accent-soft: color-mix(in srgb, var(--accent-solid) 12%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent-solid) 35%, var(--tile-line));
 }
 
 /* ───────────── The same in every theme ───────────── */
 
 :root {
   /* Status colors mean the same in every theme: green = trained, red = missed. Light themes
-     use deeper shades of the same hues (below). */
+     use deeper shades of the same hues (below). --bad is also text (Delete, errors): 4.5:1 on
+     every dark page, panel, surface and tile. */
   --good: #0ca30c;
-  --bad: #d03b3b;
+  --bad: #e35f5f;
 
   /* Chart series (fixed order, never cycled), colorblind-checked with the dataviz palette
      validator: neighbors stay apart for protan and deutan vision. Light themes use the same
-     hues, darker (below). */
+     hues, darker (below). look.ts's MARK_COLORS repeats these and the light ones: a Custom
+     theme starts from its family's and moves each only as far as it must to show on it. */
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;

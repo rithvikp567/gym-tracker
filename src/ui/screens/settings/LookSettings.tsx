@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { ACCENTS, THEMES, withRecentColor, type Settings } from "../../../services/SettingsService";
+import { ACCENTS, MIN_ACCENT_ALPHA, THEMES, withRecentColor, type Settings } from "../../../services/SettingsService";
 import { Toggle } from "../../components/controls";
 import { previewLook } from "../../LookSync";
 import { useServices, useSettings } from "../../ServicesContext";
@@ -164,7 +164,7 @@ export function LookSettings() {
             title={picking === "theme" ? "Theme color" : "Accent color"}
             initial={picking === "theme" ? (current.customThemeColor ?? look.bg) : (current.customAccentColor ?? shownAccent(look.bg))}
             recent={picking === "theme" ? current.recentThemeColors : current.recentAccentColors}
-            minAlpha={picking === "theme" ? 0 : 0.2}
+            minAlpha={picking === "theme" ? 0 : MIN_ACCENT_ALPHA}
             shows={picking === "theme" ? themeShown : accentShown}
             onPreview={preview}
             onDone={done}

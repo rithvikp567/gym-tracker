@@ -28,7 +28,7 @@ export function ColorPicker({
   recent: readonly string[];
   /** The lowest opacity allowed, 0–1 (an accent you can't see would hide every button). */
   minAlpha: number;
-  /** The color the page shows for a pick (a theme's background, an accent's fill), for the before / after swatches. */
+  /** The color the page shows for a pick (a theme's background, an accent's fill), for the before / after and recent swatches and the opacity slider. */
   shows: (color: string) => string;
   onPreview: (color: string) => void;
   onDone: (color: string) => void;
@@ -94,7 +94,9 @@ export function ColorPicker({
             </label>
             <label className="cp-row">
               <span className="cp-label">Opacity</span>
-              <span className="cp-track is-alpha" style={{ "--track": `linear-gradient(to right, ${formatColor({ ...fromHsva(hsva), a: 0 })}, ${opaque})` } as Paint}>
+              {/* From what fully see-through shows (an accent: nothing, over the checkerboard; a theme:
+                  plain black or white) to the opaque color, as the page would show it. */}
+              <span className="cp-track is-alpha" style={{ "--track": `linear-gradient(to right, ${shows(formatColor({ ...fromHsva(hsva), a: 0 }))}, ${shows(opaque)})` } as Paint}>
                 <input
                   type="range"
                   className="cp-range"
@@ -102,7 +104,7 @@ export function ColorPicker({
                   max={100}
                   value={Math.round(hsva.a * 100)}
                   onChange={(e) => change({ a: Number(e.target.value) / 100 })}
-                  style={{ "--thumb": color } as Paint}
+                  style={{ "--thumb": shows(color) } as Paint}
                 />
               </span>
               <span className="cp-num num">{Math.round(hsva.a * 100)}%</span>
@@ -129,7 +131,7 @@ export function ColorPicker({
                     aria-label={`Use ${c.toUpperCase()}`}
                     title={c.toUpperCase()}
                     aria-pressed={c === color}
-                    style={{ "--swatch": c } as Paint}
+                    style={{ "--swatch": shows(c) } as Paint}
                     onClick={() => change(start(c, minAlpha))}
                   />
                 ))}

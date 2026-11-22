@@ -575,6 +575,29 @@ describe("Workout Days holds, mounted", () => {
     expect(byClass(host, "day-card")).toHaveLength(1);
     expect(held(host)).toBe(false);
   });
+
+  it("holds the day the route opened once you press or type in its card, before the edit changes its size", async () => {
+    type Cards = { onPointerDownCapture: () => void; onKeyDownCapture: () => void };
+    for (const how of ["onPointerDownCapture", "onKeyDownCapture"] as const) {
+      const s = makeServices();
+      const upper = await s.setup.createDay("Upper 1");
+      await s.setup.createDay("Lower");
+      const host = mount(
+        createElement(ServicesProvider, {
+          services: s,
+          children: createElement(CenterPage, { page: "setup", enter: false, children: createElement(SetupScreen, { openDayId: upper.id }) }),
+        }),
+      );
+      await settle();
+      expect(held(host), how).toBe(false);
+      act(() => reactProps<Cards>(one(host, "day-cards"))[how]()); // the press on Add, Enter in the field
+      expect(held(host), how).toBe(true);
+      await act(() => s.setup.updateDay(upper.id, (d) => d.addExercise("Face pull", "strength")));
+      await settle();
+      expect(held(host), how).toBe(true);
+      unmount();
+    }
+  });
 });
 
 describe("Sheet, mounted", () => {

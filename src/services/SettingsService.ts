@@ -39,6 +39,12 @@ export const ACCENTS: readonly { key: AccentId; label: string }[] = [
 /** How many custom colors each picker remembers. */
 export const RECENT_COLORS = 5;
 
+/**
+ * The lowest opacity a Custom accent can have (the picker's floor): an accent you can't see would
+ * hide every button and switch. A stored or synced one below it is raised to it.
+ */
+export const MIN_ACCENT_ALPHA = 0.2;
+
 export interface Settings {
   theme: ThemeName;
   /** The Custom theme's color (`#rrggbb` or `#rrggbbaa`), once one was picked. */
@@ -149,10 +155,17 @@ export class SettingsService implements SyncedPreferences {
     return { values: { ...this.current }, updatedAt: newest(this.stamps), stamps: { ...this.stamps } };
   }
 
+  /**
+   * Takes another copy's settings one by one, each with its stamp. A value this version can't
+   * read (junk from a damaged copy, a later version's id or color format) is skipped, value and
+   * stamp: it can't replace a good value here, and this device never sends a fallback for it
+   * back to the account with the newer stamp, which would spread it to every device.
+   */
   applyRemote(snapshot: PreferencesSnapshot): void {
-    const listed = SETTING_KEYS.filter((k) => Object.hasOwn(snapshot.values, k));
+    const values = snapshot.values as Partial<Record<keyof Settings, unknown>>;
+    const listed = readableKeys(this.current, values);
     const copyAt = isoTime(snapshot.updatedAt);
-    this.current = sanitize({ ...this.current, ...(snapshot.values as Partial<Settings>) });
+    this.current = sanitize({ ...this.current, ...Object.fromEntries(listed.map((k) => [k, values[k]])) });
     this.stamps = {
       ...this.stamps,
       ...Object.fromEntries(listed.map((k) => [k, isoTime(snapshot.stamps?.[k]) ?? copyAt ?? this.stamps[k]])),
@@ -183,12 +196,14 @@ export class SettingsService implements SyncedPreferences {
 
 /**
  * Known keys with valid values only, so a bad copy from storage or another device can't break
- * the UI: unknown ids, colors that aren't hex, lists that aren't lists or are too long. Custom
- * without a color to show falls back to the default.
+ * the UI: unknown ids, colors that aren't hex, lists that aren't lists or are too long, an accent
+ * too see-through to show (raised to `MIN_ACCENT_ALPHA`). Custom without a color to show falls
+ * back to the default. (A copy from another device first goes through `readableKeys`, so junk
+ * there leaves the setting here as it was instead of falling back.)
  */
 function sanitize(values: Partial<Record<keyof Settings, unknown>>): Settings {
   const customThemeColor = cleanColor(values.customThemeColor);
-  const customAccentColor = cleanColor(values.customAccentColor);
+  const customAccentColor = cleanAccentColor(values.customAccentColor);
   const theme = values.theme === "custom" ? (customThemeColor ? "custom" : null) : THEMES.find((t) => t.key === values.theme)?.key;
   const accent = values.accent === "custom" ? (customAccentColor ? "custom" : null) : ACCENTS.find((a) => a.key === values.accent)?.key;
   return {
@@ -197,9 +212,34 @@ function sanitize(values: Partial<Record<keyof Settings, unknown>>): Settings {
     accent: accent ?? DEFAULTS.accent,
     customAccentColor,
     recentThemeColors: cleanColors(values.recentThemeColors),
-    recentAccentColors: cleanColors(values.recentAccentColors),
+    recentAccentColors: cleanColors(values.recentAccentColors, cleanAccentColor),
     showLastSession: typeof values.showLastSession === "boolean" ? values.showLastSession : DEFAULTS.showLastSession,
   };
+}
+
+/** Whether a value from another copy is one this version can read, setting by setting. */
+const READABLE: { [K in keyof Settings]: (value: unknown) => boolean } = {
+  theme: (v) => v === "custom" || THEMES.some((t) => t.key === v),
+  customThemeColor: (v) => v === null || cleanColor(v) !== null,
+  accent: (v) => v === "custom" || ACCENTS.some((a) => a.key === v),
+  customAccentColor: (v) => v === null || cleanColor(v) !== null,
+  recentThemeColors: Array.isArray,
+  recentAccentColors: Array.isArray,
+  showLastSession: (v) => typeof v === "boolean",
+};
+
+/**
+ * The settings in `values` this version can take over `current`: readable ones, and Custom only
+ * with a color to show (the copy's, or the one here when the copy's was skipped).
+ */
+function readableKeys(current: Settings, values: Partial<Record<keyof Settings, unknown>>): (keyof Settings)[] {
+  const keys = SETTING_KEYS.filter((k) => Object.hasOwn(values, k) && READABLE[k](values[k]));
+  const colorAfter = (k: "customThemeColor" | "customAccentColor") => (keys.includes(k) ? cleanColor(values[k]) : current[k]);
+  return keys.filter(
+    (k) =>
+      !(k === "theme" && values.theme === "custom" && !colorAfter("customThemeColor")) &&
+      !(k === "accent" && values.accent === "custom" && !colorAfter("customAccentColor")),
+  );
 }
 
 /** `settings` as shown: an accent nobody picked yet is the one its theme had before accents were a setting. */
@@ -219,12 +259,20 @@ export function cleanColor(value: unknown): string | null {
   return color.length === 9 && color.endsWith("ff") ? color.slice(0, 7) : color;
 }
 
-/** A list of recent colors: valid ones only, no repeats, at most `RECENT_COLORS`. */
-function cleanColors(value: unknown): string[] {
+/** A Custom accent's color: as `cleanColor`, with its opacity raised to `MIN_ACCENT_ALPHA`. */
+export function cleanAccentColor(value: unknown): string | null {
+  const color = cleanColor(value);
+  const floor = Math.round(MIN_ACCENT_ALPHA * 255);
+  if (!color || color.length === 7 || parseInt(color.slice(7), 16) >= floor) return color;
+  return color.slice(0, 7) + floor.toString(16).padStart(2, "0");
+}
+
+/** A list of recent colors: valid ones only (as `clean` has them), no repeats, at most `RECENT_COLORS`. */
+function cleanColors(value: unknown, clean: (value: unknown) => string | null = cleanColor): string[] {
   if (!Array.isArray(value)) return [];
   const out: string[] = [];
   for (const item of value.slice(0, RECENT_COLORS * 4)) {
-    const color = cleanColor(item);
+    const color = clean(item);
     if (color && !out.includes(color)) out.push(color);
     if (out.length === RECENT_COLORS) break;
   }

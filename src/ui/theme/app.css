@@ -24,6 +24,10 @@
   margin: 0 auto;
   padding: var(--main-pad-top) calc(var(--gutter) + env(safe-area-inset-right)) var(--main-pad-bottom)
     calc(var(--gutter) + env(safe-area-inset-left));
+  /* A sideways slide (another year, another day) moves content further than the phone's gutter for
+     a moment: clipped here, so the page never gets wider than the screen and pans. `clip`, not
+     `hidden`: no scroll container, so the page still scrolls as a whole. */
+  overflow-x: clip;
 }
 
 /* Phone: a rounded tile floating over the bottom of the page, the four tabs spread across it. */
@@ -491,7 +495,7 @@
 
 .field:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--accent-solid);
 }
 
 textarea.field {
@@ -748,9 +752,11 @@ button.list-row:active {
 
 /* ───────────── Home ───────────── */
 
-/* The week tile: ‹ title › on top, the seven days under it. */
+/* The week tile: ‹ title › on top, the seven days under it. The strip slides 24px on a week step,
+   further than this padding: clipped at the tile's edge instead of passing over its border. */
 .week-tile {
   padding: 10px 10px 12px;
+  overflow-x: clip;
 }
 
 .week-head {
@@ -834,6 +840,12 @@ button.list-row:active {
 .week-day[aria-pressed="true"] {
   background: var(--accent-soft);
   border-color: var(--accent-line);
+}
+
+/* On the accent's tint, the weekday letter and the plan's name step up from --text-3 (3:1 on
+   the plain tile only) to --text-2. */
+.week-day[aria-pressed="true"] :is(.wd, .plan) {
+  color: var(--text-2);
 }
 
 .tag-planned {
@@ -1000,6 +1012,9 @@ button.list-row:active {
   visibility: hidden;
 }
 
+/* The accent's tint over a tile (not over the panel or page: a light theme's darker panel left the
+   link under 4.5:1), with --text: --text-2 doesn't keep 4.5:1 on the tint. look.ts keeps
+   --accent-text readable on a tinted tile, so the link reads in every look. */
 .past-banner {
   display: flex;
   align-items: center;
@@ -1007,8 +1022,8 @@ button.list-row:active {
   flex-wrap: wrap;
   gap: 4px 14px;
   font-size: 13px;
-  color: var(--text-2);
-  background: var(--accent-soft);
+  color: var(--text);
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--tile);
   border: 1px solid var(--accent-line);
   border-radius: var(--tile-radius);
   padding: 8px 12px;
@@ -1187,7 +1202,7 @@ button.list-row:active {
 
 .set-input:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--accent-solid);
 }
 
 .set-input::placeholder {
@@ -1800,7 +1815,7 @@ details > summary {
 
 .field.quiet:focus {
   background: var(--bg);
-  border-color: var(--accent);
+  border-color: var(--accent-solid);
   padding-inline: 10px;
 }
 
@@ -2057,7 +2072,7 @@ form.add-row {
   a.list-row:hover,
   button.list-row:hover {
     background: color-mix(in srgb, var(--text) 5%, var(--tile));
-    border-color: color-mix(in srgb, var(--accent) 60%, var(--tile-line));
+    border-color: color-mix(in srgb, var(--accent-solid) 60%, var(--tile-line));
   }
 
   .segmented button:hover:not([aria-pressed="true"]) {

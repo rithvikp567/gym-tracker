@@ -15,7 +15,7 @@ import { SetupService } from "../src/services/SetupService";
 import { LookSync, previewLook } from "../src/ui/LookSync";
 import { LookSettings } from "../src/ui/screens/settings/LookSettings";
 import { ServicesProvider } from "../src/ui/ServicesContext";
-import { LOOK_KEY } from "../src/ui/theme/look";
+import { customThemeTokens, LOOK_KEY } from "../src/ui/theme/look";
 
 /*
  * The color picker mounted with react-dom next to LookSync, so the rules about what it saves
@@ -350,9 +350,12 @@ describe("the color picker", () => {
     expect(writes).not.toHaveBeenCalled(); // neither the settings nor the saved look
     expect(shown().accent).toBe("custom");
     expect(shown().vars["--accent-d"]).toBeDefined();
+    // Colors follow the drag at once: base.css turns transitions off while this is on <html>.
+    expect(html.getAttribute("data-look-preview")).toBe("");
 
     click(button("Done"));
     expect(pickerOpen()).toBe(false);
+    expect(html.getAttribute("data-look-preview")).toBeNull();
     expect(update).toHaveBeenCalledTimes(1);
     const picked = services.settings.get().customAccentColor!;
     expect(picked).toMatch(/^#[0-9a-f]{8}$/); // 80% opacity
@@ -375,8 +378,27 @@ describe("the color picker", () => {
       leave();
       expect(pickerOpen(), way).toBe(false);
       expect(shown(), way).toEqual({ theme: "oled", accent: "lime", vars: {} });
+      expect(html.getAttribute("data-look-preview"), way).toBeNull();
     }
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it("shows a recent theme color, and the opacity slider, as the page would look: a theme never shows through", () => {
+    act(() => services.settings.update({ recentThemeColors: ["#3366ff80"] }));
+    click(byLabel("Custom theme"));
+    const swatch = byClass("cp-recent-color")[0]!;
+    expect(swatch.style.getPropertyValue("--swatch")).toBe(customThemeTokens("#3366ff80").tokens["--bg"]);
+    expect(swatch.style.getPropertyValue("--swatch")).toMatch(/^#[0-9a-f]{6}$/); // opaque
+    // Fully see-through is plain black for a dark color.
+    const opacity = byClass("cp-range")[1]!;
+    expect(byClass("cp-track")[1]!.style.getPropertyValue("--track")).toMatch(/^linear-gradient\(to right, #000000, #[0-9a-f]{6}\)$/);
+    expect(opacity.style.getPropertyValue("--thumb")).toMatch(/^#[0-9a-f]{6}$/);
+    click(button("Cancel"));
+
+    // An accent does show through: its recent colors keep their opacity, over the checkerboard.
+    act(() => services.settings.update({ recentAccentColors: ["#3366ff80"] }));
+    click(byLabel("Custom accent color"));
+    expect(byClass("cp-recent-color")[0]!.style.getPropertyValue("--swatch")).toBe("#3366ff80");
   });
 
   it("keeps open when a press inside is let go outside (selecting the hex text past the edge)", () => {

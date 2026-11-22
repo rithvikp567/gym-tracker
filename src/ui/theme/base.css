@@ -87,9 +87,11 @@ h2 {
   border: 0;
 }
 
-/* The outline follows each element's own corners (a tile stays a rounded tile while focused). */
+/* The outline follows each element's own corners (a tile stays a rounded tile while focused).
+   The accent as text: opaque and readable on every ground, even when a Custom accent's fill is
+   see-through. */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-text);
   outline-offset: 2px;
 }
 
@@ -103,8 +105,8 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
-/* While a color is dragged in the color picker (it sets data-look-preview on <html>), colors
-   follow the finger at once instead of easing behind it. */
+/* While the color picker previews a color (ui/LookSync.tsx's previewLook sets data-look-preview
+   on <html>), colors follow the finger at once instead of easing behind it. */
 :root[data-look-preview] *,
 :root[data-look-preview] *::before,
 :root[data-look-preview] *::after {
