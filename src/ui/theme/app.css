@@ -169,24 +169,27 @@
     container-type: size;
   }
 
+  /* Each square is a container too, so its icon, gap and label shrink with it on a short window
+     (a phone turned sideways) instead of being cut off at the bottom. */
   .tab {
     flex: none;
     width: min(100cqw, (100cqh - 3 * var(--tile-gap)) / 4);
     aspect-ratio: 1;
     overflow: hidden;
+    container-type: inline-size;
     background: var(--tile);
     border: 1px solid var(--accent-line);
     border-radius: var(--tile-radius);
   }
 
   .tab-face {
-    gap: 10px;
-    font-size: 14px;
+    gap: clamp(2px, 8cqi, 10px);
+    font-size: clamp(11px, 11cqi, 14px);
   }
 
   .tab svg {
-    width: 30px;
-    height: 30px;
+    width: clamp(18px, 25cqi, 30px);
+    height: clamp(18px, 25cqi, 30px);
   }
 
   .tab-marker {
@@ -202,10 +205,6 @@
     padding: var(--main-pad-top) clamp(20px, 3vw, 40px) var(--main-pad-bottom);
     background: var(--panel);
     border-radius: var(--panel-radius);
-  }
-
-  .page {
-    min-height: calc(100dvh - 2 * var(--tile-gap) - var(--main-pad-top) - var(--main-pad-bottom));
   }
 }
 
@@ -232,9 +231,18 @@
   justify-content: flex-start;
 }
 
-/* The page fills the space between the top of the screen and the tab bar (phone) or the main panel. */
+/* The page fills the space between the top of the screen and the tab bar (phone) or the main panel
+   (computer: the panel is inset by --tile-gap top and bottom, so the page is that much shorter, and
+   a short page neither scrolls nor pushes the panel's bottom edge off the window). The computer
+   rule has to come after the phone one: same specificity, so the later one wins. */
 .page {
   min-height: calc(100dvh - var(--main-pad-top) - var(--main-pad-bottom));
+}
+
+@media (min-width: 900px) {
+  .page {
+    min-height: calc(100dvh - 2 * var(--tile-gap) - var(--main-pad-top) - var(--main-pad-bottom));
+  }
 }
 
 .page-content {
@@ -269,19 +277,28 @@
 
 /* ───────────── Screen header ───────────── */
 
-/* Title centered; actions (Done, Close) on the right in a column as wide as the empty one on the left. */
+/* Title centered. With actions (Done, Close), they sit on the right in a column as wide as the
+   action, and an empty one as wide on the left keeps the title in the middle; without actions the
+   title has the whole width (a narrow phone doesn't wrap it for nothing). */
 .screen-head {
   display: grid;
-  grid-template-columns: minmax(0, 64px) minmax(0, 1fr) minmax(0, 64px);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   margin-bottom: 20px;
   text-align: center;
 }
 
+.screen-head.has-actions {
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+}
+
 .screen-head .head-text {
-  grid-column: 2;
   min-width: 0;
+}
+
+.screen-head.has-actions .head-text {
+  grid-column: 2;
 }
 
 /* Level with the title's line, not the middle of title + sub. */
@@ -553,14 +570,19 @@ select.field {
   height: 22px;
   border-radius: 50%;
   background: #fff;
-  transition: transform var(--dur) var(--ease-out);
+  transition:
+    transform var(--dur) var(--ease-out),
+    background-color var(--dur) ease-out;
 }
 
 .toggle[aria-checked="true"] {
   background: var(--accent);
 }
 
+/* On, the knob takes the accent's own text color: a white knob vanished on a light accent (Lime,
+   Ink on a dark theme), and every accent's ink is picked to stand out on its fill. */
 .toggle[aria-checked="true"]::after {
+  background: var(--accent-ink);
   transform: translateX(20px);
 }
 
@@ -652,6 +674,20 @@ button.list-row:active {
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
+}
+
+/* A narrow phone (320px): side columns just as wide as the check and the chevron, so the
+   "6 exercises · last Nov 16" line stays on one line. */
+@media (max-width: 359px) {
+  .day-row {
+    grid-template-columns: 42px minmax(0, 1fr) 42px;
+    gap: 8px;
+    padding-inline: 12px;
+  }
+
+  .day-row .side.end {
+    gap: 2px;
+  }
 }
 
 /* Bottom sheet (calendar day, confirmations): a rounded panel floating above the bottom edge on
@@ -878,17 +914,21 @@ button.list-row:active {
   white-space: nowrap;
 }
 
+/* The date pill has one width for every date (the longest label, "Wed, May 28 | Week 48", fits),
+   so the ‹ › on either side stay at the same x from one day to the next, under a quick second tap. */
 .day-stepper {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 210px) 36px;
   justify-content: center;
+  align-items: center;
   gap: 8px;
 }
 
 .date-picker {
   position: relative;
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
   min-width: 0;
   min-height: 34px;
@@ -898,6 +938,14 @@ button.list-row:active {
   font-size: 14px;
   color: var(--text-2);
   white-space: nowrap;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out,
+    color var(--dur-fast) ease-out;
+}
+
+.date-picker:active {
+  transform: scale(0.97);
 }
 
 .date-picker input {
@@ -961,12 +1009,14 @@ button.list-row:active {
   color: var(--text-2);
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);
-  border-radius: var(--radius);
+  border-radius: var(--tile-radius);
   padding: 8px 12px;
   margin-bottom: 12px;
 }
 
-/* A rest day's workouts: a list, in the narrower column of Home. */
+/* A rest day's workouts: a list, in the narrower column of Home; its header takes the same column,
+   so the ‹ back lines up with the rows (the ‹ date › arrows are centered either way and don't move). */
+.day-screen .session-head,
 .day-screen .slide-body {
   max-width: 720px;
   margin-inline: auto;
@@ -976,8 +1026,11 @@ button.list-row:active {
   margin-top: 8px;
 }
 
-/* The exercises: one tile, a hairline between rows; the open row is tinted. */
+/* The exercises: one tile, a hairline between rows; the open row is tinted. It's a size container:
+   on a computer the rows become a table only once the tile is wide enough for its columns (a
+   narrow window, or a phone turned sideways with its notch insets, keeps the two-line rows). */
 .ex-table {
+  container: ex-table / inline-size;
   background: var(--tile);
   border: 1px solid var(--accent-line);
   border-radius: var(--tile-radius);
@@ -1015,6 +1068,12 @@ button.list-row:active {
 
 .ex-row.open {
   background: color-mix(in srgb, var(--text) 5%, var(--tile));
+}
+
+/* A press tints a closed row (not an open one: its editor's inputs are inside it). More specific
+   than the hover tint below, so a mouse press shows too. */
+.ex-list > .ex-row:not(.open):active {
+  background: color-mix(in srgb, var(--text) 7%, var(--tile));
 }
 
 .ex-name {
@@ -1174,80 +1233,83 @@ button.list-row:active {
   margin: -2px 0 0;
 }
 
+/* Desktop table: Exercise | Weight | Reps | Last time | Target. Every column, the exercise names
+   included, is centered in its track; the tracks share the width so gaps look even. The columns
+   need 170 + 2 × 80 + 120 + 80 px, 4 gaps of 16 and the row's 2 × 16 padding: 626px. */
 @media (min-width: 900px) {
-  /* Desktop table: Exercise | Weight | Reps | Last time | Target. Every column, the exercise
-     names included, is centered in its track; the tracks share the width so gaps look even. */
-  .ex-head,
-  .ex-row {
-    grid-template-columns: minmax(170px, 1.6fr) repeat(2, minmax(80px, 1fr)) minmax(120px, 1.3fr) minmax(80px, 1fr);
-    grid-template-areas: "name weight reps last target";
-    column-gap: 16px;
-    align-items: center;
-  }
+  @container ex-table (min-width: 626px) {
+    .ex-head,
+    .ex-row {
+      grid-template-columns: minmax(170px, 1.6fr) repeat(2, minmax(80px, 1fr)) minmax(120px, 1.3fr) minmax(80px, 1fr);
+      grid-template-areas: "name weight reps last target";
+      column-gap: 16px;
+      align-items: center;
+    }
 
-  .ex-head {
-    display: grid;
-    padding: 12px 16px 10px;
-    font-size: 12px;
-    color: var(--text-3);
-    border-bottom: 1px solid var(--tile-line);
-  }
+    .ex-head {
+      display: grid;
+      padding: 12px 16px 10px;
+      font-size: 12px;
+      color: var(--text-3);
+      border-bottom: 1px solid var(--tile-line);
+    }
 
-  .ex-head span,
-  .ex-weight,
-  .ex-reps,
-  .ex-last,
-  .ex-target {
-    justify-self: center;
-    text-align: center;
-  }
+    .ex-head span,
+    .ex-weight,
+    .ex-reps,
+    .ex-last,
+    .ex-target {
+      justify-self: center;
+      text-align: center;
+    }
 
-  .ex-name {
-    justify-self: center;
-    justify-content: center;
-    text-align: center;
-    max-width: 100%;
-  }
+    .ex-name {
+      justify-self: center;
+      justify-content: center;
+      text-align: center;
+      max-width: 100%;
+    }
 
-  .ex-meta {
-    display: contents;
-  }
+    .ex-meta {
+      display: contents;
+    }
 
-  .ex-meta .sep,
-  .ex-last .prefix {
-    display: none;
-  }
+    .ex-meta .sep,
+    .ex-last .prefix {
+      display: none;
+    }
 
-  .ex-target {
-    grid-area: target;
-    font-size: 14px;
-    color: var(--text-2);
-  }
+    .ex-target {
+      grid-area: target;
+      font-size: 14px;
+      color: var(--text-2);
+    }
 
-  .ex-last {
-    grid-area: last;
-    font-size: 13px;
-    color: var(--text-3);
-  }
+    .ex-last {
+      grid-area: last;
+      font-size: 13px;
+      color: var(--text-3);
+    }
 
-  .ex-reps {
-    font-size: 15px;
-  }
+    .ex-reps {
+      font-size: 15px;
+    }
 
-  /* The open row's sets, buttons, and note sit centered under the row. */
-  .ex-editor,
-  .ex-note-view {
-    justify-self: center;
-    width: min(560px, 100%);
-  }
+    /* The open row's sets, buttons, and note sit centered under the row. */
+    .ex-editor,
+    .ex-note-view {
+      justify-self: center;
+      width: min(560px, 100%);
+    }
 
-  .editor-actions,
-  .done-toggle {
-    justify-content: center;
-  }
+    .editor-actions,
+    .done-toggle {
+      justify-content: center;
+    }
 
-  .plates-hint {
-    text-align: center;
+    .plates-hint {
+      text-align: center;
+    }
   }
 }
 
@@ -1307,8 +1369,8 @@ button.list-row:active {
   gap: var(--tile-gap);
 }
 
-/* (Viewport widths, not a container query: a query container would also hold the day sheet,
-   which is position: fixed.) */
+/* (Viewport widths. A container query would work too now: the day sheet is drawn into <body>,
+   so a query container here wouldn't become the box its fixed backdrop is placed in.) */
 @media (min-width: 600px) {
   .months {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1392,8 +1454,10 @@ button.list-row:active {
   gap: var(--tile-gap);
 }
 
-.progress > .screen-head {
-  margin-bottom: 4px;
+/* The title on its own tile, like Calendar's year tile. */
+.screen-head.progress-head {
+  margin-bottom: 0;
+  padding: 10px 16px 14px;
 }
 
 .progress-controls {
@@ -1421,14 +1485,17 @@ button.list-row:active {
   margin: 0 2px 12px;
 }
 
+/* Side by side when both fit, sharing the row; when they don't (a narrow window, many or long day
+   names), each takes a whole line instead of being cut off. */
 @media (min-width: 900px) {
   .progress-controls {
     flex-direction: row;
-    justify-content: space-between;
+    flex-wrap: wrap;
   }
 
   .progress-controls .segmented {
-    flex: 0 1 auto;
+    flex: 1 0 auto;
+    max-width: 100%;
   }
 
   .chart-box {
@@ -1458,6 +1525,7 @@ button.list-row:active {
   color: var(--text);
   transition:
     transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out,
     color var(--dur) ease-out,
     border-color var(--dur) ease-out;
 }
@@ -1565,6 +1633,11 @@ details > summary {
   padding: 16px;
   text-align: left;
   transition: background-color var(--dur-fast) ease-out;
+}
+
+/* More specific than the hover tint below, so a mouse press shows too. */
+.day-card .day-card-head:active {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
 .day-card-head .grow {
@@ -2003,9 +2076,14 @@ form.add-row {
   }
 
   .jump-btn:hover:not(:disabled),
-  .chip-btn:hover:not(:disabled) {
+  .chip-btn:hover:not(:disabled),
+  .date-picker:hover {
     background: color-mix(in srgb, var(--text) 6%, transparent);
     color: var(--text);
+  }
+
+  .series-chip:hover {
+    background: color-mix(in srgb, var(--text) 6%, transparent);
   }
 
   .day-card-head:hover {

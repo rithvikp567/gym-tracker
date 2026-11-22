@@ -66,9 +66,13 @@ function TabTiles({ active }: { active: TabName }) {
       if (!tile) return;
       // Only a tab switch glides; the first placement and a resize (window, phone ↔ rail) jump.
       m.dataset.glide = animate ? "true" : "false";
-      m.style.width = `${tile.offsetWidth}px`;
-      m.style.height = `${tile.offsetHeight}px`;
-      m.style.transform = `translate(${tile.offsetLeft}px, ${tile.offsetTop}px)`;
+      // From the boxes as drawn, fractions included: the rail's squares are sized in container
+      // units, and whole-pixel offsets left the marker's outline up to a pixel off the tile's.
+      const origin = container.getBoundingClientRect();
+      const t = tile.getBoundingClientRect();
+      m.style.width = `${t.width}px`;
+      m.style.height = `${t.height}px`;
+      m.style.transform = `translate(${t.left - origin.left - container.clientLeft}px, ${t.top - origin.top - container.clientTop}px)`;
       m.dataset.shown = "true";
     };
     place(placed.current);

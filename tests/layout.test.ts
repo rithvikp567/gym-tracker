@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -121,10 +122,59 @@ describe("centered blocks and headers", () => {
     expect(render(true)).toContain('class="center-block is-held"');
   });
 
-  it("puts a screen's title in the middle and its actions in their own column on the right", () => {
-    const plain = renderToString(createElement(ScreenHead, { title: "Progress", sub: "Heaviest set" }));
-    expect(plain).toBe('<header class="screen-head"><div class="head-text"><h1>Progress</h1><div class="sub">Heaviest set</div></div></header>');
+  it("puts a screen's title in the middle, with side columns only when it has actions", () => {
+    // No actions: the title has the whole width (a 320px phone doesn't wrap "Workout Days" for nothing).
+    const plain = renderToString(createElement(ScreenHead, { title: "Settings", sub: "Account" }));
+    expect(plain).toBe('<header class="screen-head"><div class="head-text"><h1>Settings</h1><div class="sub">Account</div></div></header>');
     const withDone = renderToString(createElement(ScreenHead, { title: "Workout Days", actions: createElement("a", null, "Done") }));
+    expect(withDone).toMatch(/^<header class="screen-head has-actions">/);
     expect(withDone).toContain('<div class="head-actions"><a>Done</a></div>');
+  });
+
+  it("can put a title on a tile, as Progress does like Calendar's year tile", () => {
+    const html = renderToString(createElement(ScreenHead, { title: "Progress", className: "tile progress-head" }));
+    expect(html).toMatch(/^<header class="screen-head tile progress-head">/);
+  });
+});
+
+describe("stylesheet rules that depend on their order or on a token", () => {
+  // Comments blanked out (same length, so positions hold): they may mention selectors.
+  const css = readFileSync(new URL("../src/ui/theme/app.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, (c) => " ".repeat(c.length));
+
+  /** Every rule for exactly `selector`, in file order, with the at-rules (@media…) it sits in. */
+  function rulesFor(selector: string): { at: number; within: string[]; body: string }[] {
+    const found: { at: number; within: string[]; body: string }[] = [];
+    const open: string[] = [];
+    let start = 0;
+    for (let i = 0; i < css.length; i++) {
+      const ch = css[i];
+      if (ch === "{") {
+        const prelude = css.slice(start, i).trim();
+        if (prelude === selector) found.push({ at: i, within: [...open], body: css.slice(i + 1, css.indexOf("}", i)) });
+        open.push(prelude);
+        start = i + 1;
+      } else if (ch === "}") {
+        open.pop();
+        start = i + 1;
+      } else if (ch === ";") {
+        start = i + 1;
+      }
+    }
+    return found;
+  }
+
+  it("makes the page shorter on a computer by the main panel's insets, in a rule after the phone one (so it wins)", () => {
+    const rules = rulesFor(".page").filter((r) => r.body.includes("min-height"));
+    const phone = rules.filter((r) => r.within.length === 0);
+    const desktop = rules.filter((r) => r.within.includes("@media (min-width: 900px)"));
+    expect(phone).toHaveLength(1);
+    expect(desktop).toHaveLength(1);
+    expect(desktop[0]!.body).toContain("2 * var(--tile-gap)");
+    expect(desktop[0]!.at).toBeGreaterThan(phone[0]!.at);
+  });
+
+  it("draws a switched-on toggle's knob in the accent's own text color (white vanished on a light accent)", () => {
+    const [rule] = rulesFor('.toggle[aria-checked="true"]::after');
+    expect(rule?.body).toMatch(/background: var\(--accent-ink\);/);
   });
 });

@@ -17,12 +17,15 @@ import { SessionService } from "../src/services/SessionService";
 import { SettingsService } from "../src/services/SettingsService";
 import { SetupService } from "../src/services/SetupService";
 import { CenterPage, useHoldBriefly, usePageHold } from "../src/ui/components/CenterBlock";
+import { Sheet } from "../src/ui/components/controls";
 import { HOME_PICK_KEY, homePick, rememberHomeDay } from "../src/ui/homePick";
 import { useDayStep } from "../src/ui/hooks/useDayStep";
+import { useLookVersion } from "../src/ui/hooks/useLookVersion";
 import { useSwipe } from "../src/ui/hooks/useSwipe";
 import { setViewState } from "../src/ui/hooks/useViewState";
 import { navigate } from "../src/ui/router";
 import { HomeScreen } from "../src/ui/screens/HomeScreen";
+import { SetupScreen } from "../src/ui/screens/SetupScreen";
 import { ExerciseEditor } from "../src/ui/screens/session/ExerciseEditor";
 import { ServicesProvider } from "../src/ui/ServicesContext";
 import { slideNext } from "../src/ui/slide";
@@ -152,6 +155,13 @@ class FakeElement extends FakeNode {
     return null;
   }
 
+  scrollIntoView(): void {}
+
+  /** A <select>'s choices (React picks the selected one through this). */
+  get options(): FakeElement[] {
+    return findAll(this, (el) => el.localName === "option");
+  }
+
   getBoundingClientRect() {
     return { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 };
   }
@@ -184,6 +194,10 @@ class FakeDocument extends FakeNode {
 
   createTextNode(text: string): FakeText {
     return new FakeText(this, text);
+  }
+
+  getElementById(id: string): FakeElement | null {
+    return findAll(this, (el) => el.getAttribute("id") === id)[0] ?? null;
   }
 
   addEventListener(): void {}
@@ -264,24 +278,31 @@ afterEach(() => {
 
 const d = (iso: string) => LocalDate.parse(iso);
 
+/** Every service over an in-memory store, on Fri Nov 20, 2026. */
+function makeServices(): AppServices {
+  const clock = { now: () => new Date(2026, 10, 20, 12) }; // Fri Nov 20, 2026
+  const repos = new StoreRepositories(new MemoryRecordStore(), clock);
+  const prefs = new Map<string, string>();
+  return {
+    mode: "device",
+    changes: repos.changes,
+    setup: new SetupService(repos),
+    sessions: new SessionService(repos),
+    calendar: new CalendarService(repos, clock),
+    progress: new ProgressService(repos, clock),
+    imports: new ImportService(repos),
+    backup: new BackupService(repos),
+    settings: new SettingsService({ get: (k) => prefs.get(k) ?? null, set: (k, v) => void prefs.set(k, v) }, clock),
+    sync: new NoSync(),
+  };
+}
+
+/** The handlers React gave an element (to press it the way a tap would). */
+function reactProps<T>(el: FakeElement): T {
+  return Object.entries(el).find(([k]) => k.startsWith("__reactProps$"))![1] as T;
+}
+
 describe("Home, mounted", () => {
-  function makeServices(): AppServices {
-    const clock = { now: () => new Date(2026, 10, 20, 12) }; // Fri Nov 20, 2026
-    const repos = new StoreRepositories(new MemoryRecordStore(), clock);
-    const prefs = new Map<string, string>();
-    return {
-      mode: "device",
-      changes: repos.changes,
-      setup: new SetupService(repos),
-      sessions: new SessionService(repos),
-      calendar: new CalendarService(repos, clock),
-      progress: new ProgressService(repos, clock),
-      imports: new ImportService(repos),
-      backup: new BackupService(repos),
-      settings: new SettingsService({ get: (k) => prefs.get(k) ?? null, set: (k, v) => void prefs.set(k, v) }, clock),
-      sync: new NoSync(),
-    };
-  }
 
   /** Upper 1 planned on Mondays, logged Mon Nov 16 (this week); Lower logged Mon Nov 9 (last week). */
   async function mondays(s: AppServices) {
@@ -515,6 +536,109 @@ describe("centered page holds, mounted", () => {
     expect(held(host)).toBe(true);
     await settle(1300);
     expect(held(host)).toBe(false);
+  });
+});
+
+describe("Workout Days holds, mounted", () => {
+  const held = (host: FakeElement) => byClass(host, "is-held").length > 0;
+  /** A tap on a day's card head (opens or closes it). */
+  function tapDay(host: FakeElement, name: string): void {
+    const head = byClass(host, "day-card-head").find((el) => one(el, "title").textContent === name);
+    if (!head) throw new Error(`No card for ${name}`);
+    act(() => reactProps<{ onClick: () => void }>(head).onClick());
+  }
+
+  it("doesn't hold for the day the route opened (it would keep the Loading… offset); holds once you tap, and lets go when the open day is deleted", async () => {
+    const s = makeServices();
+    const upper = await s.setup.createDay("Upper 1");
+    const lower = await s.setup.createDay("Lower");
+    // Progress → Edit on Upper 1, with nothing loaded yet: the page draws "Loading…" first.
+    const host = mount(
+      createElement(ServicesProvider, {
+        services: s,
+        children: createElement(CenterPage, { page: "setup", enter: false, children: createElement(SetupScreen, { openDayId: upper.id }) }),
+      }),
+    );
+    expect(byClass(host, "loading")).toHaveLength(1);
+    await settle();
+    expect(byClass(host, "day-card")).toHaveLength(2);
+    expect(byClass(host, "open")).toHaveLength(1);
+    expect(held(host)).toBe(false);
+
+    tapDay(host, "Upper 1"); // closes it: nothing open
+    expect(held(host)).toBe(false);
+    tapDay(host, "Lower");
+    expect(held(host)).toBe(true);
+
+    await act(() => s.setup.deleteDay(lower.id));
+    await settle();
+    expect(byClass(host, "day-card")).toHaveLength(1);
+    expect(held(host)).toBe(false);
+  });
+});
+
+describe("Sheet, mounted", () => {
+  type BackdropProps = { onPointerDown: (e: unknown) => void; onClick: (e: unknown) => void };
+
+  it("draws into <body>, outside the page that moves while it animates", () => {
+    const host = mount(createElement(Sheet, { title: "Mon, Nov 16", onClose() {}, children: "Nothing logged." }));
+    expect(byClass(host, "sheet-backdrop")).toHaveLength(0);
+    const backdrop = one(doc.body, "sheet-backdrop");
+    expect(backdrop.parentNode).toBe(doc.body);
+    expect(one(backdrop, "sheet").textContent).toContain("Nothing logged.");
+  });
+
+  it("closes on a tap on the backdrop, not on a press that started inside and was let go outside", () => {
+    const onClose = vi.fn();
+    mount(createElement(Sheet, { title: "Mon, Nov 16", onClose, children: "Nothing logged." }));
+    const backdrop = one(doc.body, "sheet-backdrop");
+    const sheet = one(backdrop, "sheet");
+    const press = (start: FakeElement, end: FakeElement) => {
+      const props = reactProps<BackdropProps>(backdrop);
+      act(() => {
+        props.onPointerDown({ target: start, currentTarget: backdrop });
+        props.onClick({ target: end, currentTarget: backdrop });
+      });
+    };
+
+    press(sheet, backdrop); // e.g. selecting text past the sheet's edge
+    expect(onClose).not.toHaveBeenCalled();
+    press(backdrop, backdrop);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("look version, mounted", () => {
+  it("changes when the look on <html> changes, so token colors read in code are read again", () => {
+    let notify = () => {};
+    const observed: { target: unknown; options: MutationObserverInit }[] = [];
+    const disconnect = vi.fn();
+    vi.stubGlobal(
+      "MutationObserver",
+      class {
+        constructor(callback: () => void) {
+          notify = callback;
+        }
+        observe(target: unknown, options: MutationObserverInit) {
+          observed.push({ target, options });
+        }
+        disconnect = disconnect;
+      },
+    );
+    let version = -1;
+    function Probe() {
+      version = useLookVersion();
+      return null;
+    }
+    mount(createElement(Probe));
+    expect(version).toBe(0);
+    expect(observed.at(-1)!.target).toBe(doc.documentElement);
+    expect(observed.at(-1)!.options.attributeFilter).toEqual(expect.arrayContaining(["data-theme", "data-family", "style"]));
+
+    act(() => notify()); // e.g. a dark → light theme synced in from another device
+    expect(version).toBe(1);
+    unmount();
+    expect(disconnect).toHaveBeenCalled();
   });
 });
 
