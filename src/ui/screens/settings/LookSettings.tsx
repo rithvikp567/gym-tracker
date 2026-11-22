@@ -145,9 +145,6 @@ export function LookSettings() {
               <i />
             </span>
             <span className="theme-name">Custom</span>
-            <span className="theme-hint num" aria-hidden="true">
-              {current.customThemeColor ? colorName(current.customThemeColor) : "Any color"}
-            </span>
           </button>
         </div>
       </div>
@@ -177,13 +174,6 @@ export function LookSettings() {
         )}
     </div>
   );
-}
-
-/** A picked color as the picker's fields show it: hex, and the opacity when it's see-through. */
-function colorName(color: string): string {
-  const opacity = Math.round((parseColor(color)?.a ?? 1) * 100);
-  const hex = color.slice(0, 7).toUpperCase();
-  return opacity < 100 ? `${hex} · ${opacity}%` : hex;
 }
 
 /** The accent on screen now (a preset's fill for this family), to start the picker from. */

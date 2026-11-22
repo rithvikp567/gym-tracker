@@ -220,16 +220,10 @@
   flex: 0 0 calc(100% / 3 - 10.33px);
 }
 
+/* The name sits at the right end of the row. */
 .theme-choice.is-custom .theme-name {
-  text-align: left;
-}
-
-.theme-hint {
   margin-left: auto;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-2);
-  white-space: nowrap;
+  text-align: right;
 }
 
 /* No custom theme yet: the picture is a color wheel. */

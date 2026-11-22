@@ -19,10 +19,11 @@ function shortName(name: string): string {
 }
 
 function weekTitle(offset: number): string {
-  if (offset === 0) return "This week";
-  if (offset === -1) return "Last week";
-  if (offset === 1) return "Next week";
-  return offset < 0 ? `${-offset} weeks ago` : `In ${offset} weeks`;
+  // Title case, like a heading ("Last Week"), as the user asked.
+  if (offset === 0) return "This Week";
+  if (offset === -1) return "Last Week";
+  if (offset === 1) return "Next Week";
+  return offset < 0 ? `${-offset} Weeks Ago` : `In ${offset} Weeks`;
 }
 
 export function HomeScreen() {

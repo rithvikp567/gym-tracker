@@ -93,7 +93,7 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
       <ScreenHead
         title="Progress"
         className="tile progress-head"
-        sub={day.allExercises().some((e) => e.unit === "plates") ? "Heaviest set each session · plates counted in lb" : "Heaviest set each session"}
+        sub={day.allExercises().some((e) => e.unit === "plates") ? "Plates counted in lb" : undefined}
       />
       {/* Each picker is its own tile. A pick can change the page's height (a range with nothing
           logged), so the page holds its place for a moment and the pickers stay under your finger. */}

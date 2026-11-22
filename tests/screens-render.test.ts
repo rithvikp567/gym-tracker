@@ -103,7 +103,7 @@ describe("Home", () => {
 
     const html = home(s);
     expect(html).not.toContain("Loading");
-    expect(html).toContain("2 weeks ago");
+    expect(html).toContain("2 Weeks Ago");
     expect(html).toContain("Nov 2 – 8");
     expect(html).toContain("| Week 45");
     expect(html).toContain('aria-label="Previous week"');
@@ -125,7 +125,7 @@ describe("Home", () => {
     setViewState(HOME_PICK_KEY, homePick(d("2026-11-13"), today));
 
     const html = home(s);
-    expect(html).toContain("Last week");
+    expect(html).toContain("Last Week");
     expect(html).toContain('<span class="plan">U1</span>');
     expect(html).toContain("Mon, Nov 9, worked out");
     expect(html).not.toMatch(/class="week-strip"[^>]*aria-busy/);
@@ -139,7 +139,7 @@ describe("Home", () => {
     await s.setup.createDay("Upper 1"); // a change: the cached [] may be out of date now
     const html = home(s);
     expect(html).not.toContain("set up your week");
-    expect(html).toContain("This week");
+    expect(html).toContain("This Week");
   });
 
   it("keeps the sync chip's space while sync is set up but quiet", async () => {
@@ -165,7 +165,7 @@ describe("Home", () => {
     await upperAndLower(s);
     await cacheDays(s);
     const html = home(s);
-    expect(html).toMatch(/class="tile week-tile"[\s\S]*aria-label="Previous week"[\s\S]*<h1>This week<\/h1>[\s\S]*aria-label="Next week"[\s\S]*class="week-strip"/);
+    expect(html).toMatch(/class="tile week-tile"[\s\S]*aria-label="Previous week"[\s\S]*<h1>This Week<\/h1>[\s\S]*aria-label="Next week"[\s\S]*class="week-strip"/);
     expect(html).not.toContain(">Today</button>");
 
     setViewState(HOME_PICK_KEY, homePick(d("2026-11-18"), s.calendar.today()));

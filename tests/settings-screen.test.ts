@@ -61,20 +61,17 @@ describe("Settings screen", () => {
     expect(html).not.toContain("Match device");
   });
 
-  it("names a Custom theme by its color and paints its preview from it", () => {
+  it("labels the Custom theme tile just \"Custom\" (no hex, no \"Any color\") and paints its preview from the color", () => {
     const services = makeServices();
     services.settings.update({ theme: "custom", customThemeColor: "#1e2a44" });
     const html = render(services);
     expect(html).toContain('<span class="look-value" aria-hidden="true">Custom</span>');
     expect(html).toMatch(/is-custom is-set" aria-checked="true"[^>]*aria-label="Custom theme"/);
-    expect(html).toContain("#1E2A44");
+    expect(html).toMatch(/aria-label="Custom theme">.*<span class="theme-name">Custom<\/span><\/button>/);
+    expect(html).not.toMatch(/#1E2A44|Any color/);
     expect(html).toContain("--bg:#1e2a44");
-  });
-
-  it("names a see-through Custom theme with its opacity, as the picker shows it", () => {
-    const services = makeServices();
-    services.settings.update({ theme: "custom", customThemeColor: "#0070197d" });
-    expect(render(services)).toContain("#007019 · 49%");
+    // Before any custom color: still just "Custom".
+    expect(render(makeServices())).not.toContain("Any color");
   });
 
   it("no longer says where the look is saved", () => {

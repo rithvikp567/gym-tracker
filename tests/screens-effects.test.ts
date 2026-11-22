@@ -349,13 +349,13 @@ describe("Home, mounted", () => {
     await mondays(s);
     const weeks = watchWeeks(s);
     const home = await openHome(s);
-    expect(title(home)).toBe("This week");
+    expect(title(home)).toBe("This Week");
     expect(logged(home)).toEqual(["Upper 1"]);
     expect(weeks.asked()).toEqual(["2026-11-09", "2026-11-16", "2026-11-23"]);
 
     // Checked before anything in flight can land: the week was already there.
     swipe(one(home, "week-strip"), 100);
-    expect(title(home)).toBe("Last week");
+    expect(title(home)).toBe("Last Week");
     expect(busy(one(home, "week-strip"))).toBe(false);
     expect(plans(home)).toEqual(["U1", "", "", "", "", "", ""]);
     expect(logged(home)).toEqual(["Lower"]);
@@ -365,7 +365,7 @@ describe("Home, mounted", () => {
     await settle();
     expect(weeks.asked()).toEqual(["2026-11-02", "2026-11-09", "2026-11-16", "2026-11-23"]);
     swipe(one(home, "week-strip"), 100);
-    expect(title(home)).toBe("2 weeks ago");
+    expect(title(home)).toBe("2 Weeks Ago");
     expect(busy(one(home, "week-strip"))).toBe(false);
     expect(plans(home)).toEqual(["U1", "", "", "", "", "", ""]);
     expect(logged(home)).toEqual([]);
@@ -383,7 +383,7 @@ describe("Home, mounted", () => {
     swipe(one(home, "week-strip"), 100);
     expect(logged(home)).toEqual(["Lower"]);
     swipe(one(home, "week-strip"), 100);
-    expect(title(home)).toBe("2 weeks ago");
+    expect(title(home)).toBe("2 Weeks Ago");
     expect(busy(one(home, "week-strip"))).toBe(true);
     expect(plans(home)).toEqual(["", "", "", "", "", "", ""]);
     // Last week's rows (the ones just shown), not this week's.
