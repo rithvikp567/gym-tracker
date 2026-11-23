@@ -22,6 +22,7 @@ import { SetupService } from "../src/services/SetupService";
 import { CenterPage, useHoldBriefly, usePageHold } from "../src/ui/components/CenterBlock";
 import { Sheet, useSheetClose } from "../src/ui/components/controls";
 import { DateField } from "../src/ui/components/DateField";
+import { TimerSheet } from "../src/ui/timer/TimerButton";
 import { HOME_PICK_KEY, homePick, rememberHomeDay } from "../src/ui/homePick";
 import { useDayStep } from "../src/ui/hooks/useDayStep";
 import { HOLD_MS } from "../src/ui/hooks/useDragList";
@@ -965,6 +966,29 @@ describe("Sheet, mounted", () => {
       delete proto.isConnected;
       doc.body.removeChild(opener);
     }
+  });
+});
+
+describe("timer popup, mounted", () => {
+  const button = (text: string) => findAll(doc.body, (el) => el.tagName === "BUTTON" && el.textContent === text)[0] ?? null;
+
+  it("closes itself once the rest timer starts, and stays open once the stopwatch starts", () => {
+    const s = makeServices();
+    const onClose = vi.fn();
+    mount(createElement(ServicesProvider, { services: s, children: createElement(TimerSheet, { onClose }) }));
+    tap(button("Start")!);
+    expect(s.timer.get().rest.status(s.timer.now())).toBe("running");
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    unmount();
+    const onCloseAgain = vi.fn();
+    mount(createElement(ServicesProvider, { services: s, children: createElement(TimerSheet, { onClose: onCloseAgain }) }));
+    tap(button("Stopwatch")!);
+    tap(button("Start")!);
+    expect(s.timer.get().stopwatch.status(s.timer.now())).toBe("running");
+    expect(onCloseAgain).not.toHaveBeenCalled();
+    tap(button("Pause")!); // pausing never closes it either
+    expect(onCloseAgain).not.toHaveBeenCalled();
   });
 });
 

@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { formatClock, type TimerKind, type TimerStatus } from "../../domain/WorkoutTimer";
 import { REST_PRESETS, REST_STEP } from "../../services/TimerService";
-import { Segmented, Sheet } from "../components/controls";
+import { Segmented, Sheet, useSheetClose } from "../components/controls";
 import { Icon } from "../components/Icon";
 import { useServices } from "../ServicesContext";
 import { primeAlarm } from "./alarm";
@@ -57,7 +57,20 @@ export function TimerButton() {
  * closes. It grows out of the clock and shrinks back into it (D55).
  */
 export function TimerSheet({ onClose, growFrom }: { onClose: () => void; growFrom?: HTMLElement | null }) {
+  return (
+    <Sheet title="Timer" onClose={onClose} growFrom={growFrom}>
+      <TimerPanel />
+    </Sheet>
+  );
+}
+
+/**
+ * Starting (or resuming) the rest timer closes the popup: it tucks back into the clock, which
+ * counts down, so you're back on your sets. The stopwatch stays open once started (D56).
+ */
+function TimerPanel() {
   const { timer } = useServices();
+  const close = useSheetClose();
   const { state, now } = useTimer();
   const kind = state.showing;
   const current = state[kind];
@@ -68,55 +81,54 @@ export function TimerSheet({ onClose, growFrom }: { onClose: () => void; growFro
     if (status === "running") return timer.pause(kind);
     primeAlarm(); // this tap is what lets the ring play sound later
     timer.start(kind);
+    if (isRest) close();
   };
 
   return (
-    <Sheet title="Timer" onClose={onClose} growFrom={growFrom}>
-      <div className="timer">
-        <Segmented label="Timer type" options={KINDS} value={kind} onChange={(k) => timer.show(k)} />
-        <div className={`timer-face${isRest ? "" : " no-steps"}`}>
-          {isRest && (
-            <button type="button" className="timer-step num" aria-label={`${REST_STEP} seconds less`} onClick={() => timer.adjustRest(-REST_STEP)}>
-              −{REST_STEP}
-            </button>
-          )}
-          <div className={`timer-digits num${status === "done" ? " is-done" : ""}`} role="timer">
-            {formatClock(current.shown(now), isRest ? "up" : "down")}
-          </div>
-          {isRest && (
-            <button type="button" className="timer-step num" aria-label={`${REST_STEP} seconds more`} onClick={() => timer.adjustRest(REST_STEP)}>
-              +{REST_STEP}
-            </button>
-          )}
-        </div>
-        <p className="timer-status" aria-live="polite">
-          {STATUS_LINE[kind][status]}
-        </p>
+    <div className="timer">
+      <Segmented label="Timer type" options={KINDS} value={kind} onChange={(k) => timer.show(k)} />
+      <div className={`timer-face${isRest ? "" : " no-steps"}`}>
         {isRest && (
-          <div className="timer-presets" role="group" aria-label="Rest length">
-            {REST_PRESETS.map((seconds) => (
-              <button
-                key={seconds}
-                type="button"
-                className="chip-btn num"
-                aria-pressed={state.rest.lengthMs === seconds * 1000}
-                onClick={() => timer.setRestLength(seconds)}
-              >
-                {formatClock(seconds * 1000, "down")}
-              </button>
-            ))}
-          </div>
+          <button type="button" className="timer-step num" aria-label={`${REST_STEP} seconds less`} onClick={() => timer.adjustRest(-REST_STEP)}>
+            −{REST_STEP}
+          </button>
         )}
-        <div className="timer-actions">
-          <button type="button" className="btn primary" onClick={toggle}>
-            {status === "running" ? "Pause" : status === "paused" ? "Resume" : status === "done" ? "Again" : "Start"}
-          </button>
-          <button type="button" className="btn" disabled={status === "idle"} onClick={() => timer.reset(kind)}>
-            Reset
-          </button>
+        <div className={`timer-digits num${status === "done" ? " is-done" : ""}`} role="timer">
+          {formatClock(current.shown(now), isRest ? "up" : "down")}
         </div>
-        <p className="timer-hint">Keeps running while you log or close this.</p>
+        {isRest && (
+          <button type="button" className="timer-step num" aria-label={`${REST_STEP} seconds more`} onClick={() => timer.adjustRest(REST_STEP)}>
+            +{REST_STEP}
+          </button>
+        )}
       </div>
-    </Sheet>
+      <p className="timer-status" aria-live="polite">
+        {STATUS_LINE[kind][status]}
+      </p>
+      {isRest && (
+        <div className="timer-presets" role="group" aria-label="Rest length">
+          {REST_PRESETS.map((seconds) => (
+            <button
+              key={seconds}
+              type="button"
+              className="chip-btn num"
+              aria-pressed={state.rest.lengthMs === seconds * 1000}
+              onClick={() => timer.setRestLength(seconds)}
+            >
+              {formatClock(seconds * 1000, "down")}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="timer-actions">
+        <button type="button" className="btn primary" onClick={toggle}>
+          {status === "running" ? "Pause" : status === "paused" ? "Resume" : status === "done" ? "Again" : "Start"}
+        </button>
+        <button type="button" className="btn" disabled={status === "idle"} onClick={() => timer.reset(kind)}>
+          Reset
+        </button>
+      </div>
+      <p className="timer-hint">{isRest ? "Starts and tucks into the clock, which counts down." : "Keeps running while you log or close this."}</p>
+    </div>
   );
 }
