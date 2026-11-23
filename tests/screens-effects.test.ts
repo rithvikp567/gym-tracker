@@ -338,11 +338,11 @@ describe("Home, mounted", () => {
   const title = (home: FakeElement) => findAll(home, (el) => el.localName === "h1")[0]?.textContent;
   const plans = (home: FakeElement) => byClass(home, "plan").map((el) => el.textContent);
   const busy = (el: FakeElement) => el.getAttribute("aria-busy") === "true";
-  /** The rows with a check: the workouts logged on the picked date. */
+  /** The workout tiles (the big one, then the squares) with a check: those logged on the picked date. */
   const logged = (home: FakeElement) =>
-    byClass(home, "day-row")
-      .filter((row) => byClass(row, "check-mark").length > 0)
-      .map((row) => one(row, "title").firstChild?.textContent);
+    byClass(home, "workout-tile")
+      .filter((tile) => byClass(tile, "check-mark").length > 0)
+      .map((tile) => one(tile, "name").firstChild?.textContent);
 
   it("loads the weeks either side of the one on screen, so each step draws at once", async () => {
     const s = makeServices();
@@ -359,7 +359,7 @@ describe("Home, mounted", () => {
     expect(busy(one(home, "week-strip"))).toBe(false);
     expect(plans(home)).toEqual(["U1", "", "", "", "", "", ""]);
     expect(logged(home)).toEqual(["Lower"]);
-    expect(busy(one(home, "list"))).toBe(false);
+    expect(busy(one(home, "home-workouts"))).toBe(false);
 
     // A week that came from the cache loads its own neighbours in turn.
     await settle();
@@ -369,11 +369,11 @@ describe("Home, mounted", () => {
     expect(busy(one(home, "week-strip"))).toBe(false);
     expect(plans(home)).toEqual(["U1", "", "", "", "", "", ""]);
     expect(logged(home)).toEqual([]);
-    expect(busy(one(home, "list"))).toBe(false);
+    expect(busy(one(home, "home-workouts"))).toBe(false);
     await settle(); // its own reload
   });
 
-  it("keeps the week last on screen in the rows, busy and then dimmed, while the next one loads", async () => {
+  it("keeps the week last on screen in the workouts, busy and then dimmed, while the next one loads", async () => {
     const s = makeServices();
     await mondays(s);
     const weeks = watchWeeks(s, "2026-11-02");
@@ -386,23 +386,23 @@ describe("Home, mounted", () => {
     expect(title(home)).toBe("2 Weeks Ago");
     expect(busy(one(home, "week-strip"))).toBe(true);
     expect(plans(home)).toEqual(["", "", "", "", "", "", ""]);
-    // Last week's rows (the ones just shown), not this week's.
+    // Last week's workouts (the ones just shown), not this week's.
     expect(logged(home)).toEqual(["Lower"]);
-    const rows = one(home, "list");
+    const rows = one(home, "home-workouts");
     expect(busy(rows)).toBe(true);
     expect(rows.getAttribute("data-stale")).toBeNull();
 
-    await settle(200); // past the 150 ms before busy rows are dimmed
+    await settle(200); // past the 150 ms before busy workouts are dimmed
     expect(logged(home)).toEqual(["Lower"]);
-    expect(one(home, "list").getAttribute("data-stale")).toBe("true");
+    expect(one(home, "home-workouts").getAttribute("data-stale")).toBe("true");
 
     weeks.release();
     await settle();
     expect(busy(one(home, "week-strip"))).toBe(false);
     expect(plans(home)).toEqual(["U1", "", "", "", "", "", ""]);
     expect(logged(home)).toEqual([]);
-    expect(busy(one(home, "list"))).toBe(false);
-    expect(one(home, "list").getAttribute("data-stale")).toBeNull();
+    expect(busy(one(home, "home-workouts"))).toBe(false);
+    expect(one(home, "home-workouts").getAttribute("data-stale")).toBeNull();
   });
 });
 

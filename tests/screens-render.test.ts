@@ -91,6 +91,20 @@ async function upperAndLower(s: AppServices) {
 }
 
 const count = (html: string, text: string) => html.split(text).length - 1;
+/** The HTML from the first `from` up to and including the `to` after it. */
+const between = (html: string, from: string, to: string) => {
+  const start = html.indexOf(from);
+  expect(start).toBeGreaterThanOrEqual(0);
+  return html.slice(start, html.indexOf(to, start) + to.length);
+};
+
+/** The same loads as Home's, under its keys. */
+const cacheWeek = (s: AppServices, weekStart: LocalDate) => {
+  const w = homeWeek(s.calendar, weekStart, s.calendar.today());
+  return prefetchLive(s, w.cacheAs, w.deps, w.load);
+};
+const cacheLastDone = (s: AppServices) =>
+  prefetchLive(s, "lastDone", [s.calendar.today().toString()], () => s.sessions.lastWorkoutDates(s.calendar.today()));
 
 beforeEach(() => setViewState(HOME_PICK_KEY, null));
 
@@ -109,9 +123,79 @@ describe("Home", () => {
     expect(html).toContain('aria-label="Previous week"');
     expect(count(html, 'class="week-day')).toBe(7);
     for (const n of [2, 3, 4, 5, 6, 7, 8]) expect(html).toContain(`<span class="dn num">${n}</span>`);
-    // The rows are there (for the picked date), marked as still loading.
+    // The workouts are there (for the picked date), marked as still loading; with no week
+    // loaded yet the plan isn't known, so the big tile only holds its space.
     expect(html).toContain(`href="#/session/${upper.id}/2026-11-06"`);
-    expect(html).toMatch(/class="list" aria-busy="true"/);
+    expect(html).toMatch(/class="home-workouts" aria-busy="true"/);
+    expect(html).toContain('class="tile hero rest is-placeholder" aria-hidden="true"');
+  });
+
+  it("shows the picked day's planned workout big, with Start, and the others as squares with no dates", async () => {
+    const s = makeServices(); // today is Fri Nov 20
+    const { upper, lower, pulldown } = await upperAndLower(s);
+    await s.sessions.saveLog(lower.id, d("2026-11-17"), ExerciseLog.empty(pulldown.id).withSets([new SetEntry(60, 10)]));
+    await cacheDays(s);
+    await cacheWeek(s, d("2026-11-23"));
+    await cacheLastDone(s);
+    setViewState(HOME_PICK_KEY, homePick(d("2026-11-23"), s.calendar.today())); // next Monday: Upper 1
+
+    const html = home(s);
+    const hero = between(html, 'class="tile hero', "</a>");
+    expect(hero).toContain(`href="#/session/${upper.id}/2026-11-23"`);
+    expect(hero).toContain("Upper 1");
+    expect(hero).toContain("1 exercise · not logged yet");
+    expect(hero).toContain('<span class="btn primary hero-go">Start</span>');
+    expect(html).toContain("Other workouts");
+    const square = between(html, 'class="tile square', "</a>");
+    expect(square).toContain(`href="#/session/${lower.id}/2026-11-23"`);
+    // Just the name: Lower was last done Nov 17, and no date (or count) shows on its square.
+    expect(square).toMatch(/><span class="name">Lower<\/span><\/a>$/);
+    expect(html).not.toContain("Nov 17");
+    expect(count(html, 'class="tile square')).toBe(1);
+  });
+
+  it("puts what was logged that day in the big tile (Open), and says Log for an earlier day", async () => {
+    const s = makeServices();
+    const { upper, lower, pulldown } = await upperAndLower(s);
+    const log = ExerciseLog.empty(pulldown.id).withSets([new SetEntry(60, 10)]);
+    await s.sessions.saveLog(lower.id, d("2026-11-16"), log); // Monday: Upper 1 planned, Lower done
+    await cacheDays(s);
+    await cacheWeek(s, d("2026-11-16"));
+    await cacheLastDone(s);
+    const today = s.calendar.today();
+
+    setViewState(HOME_PICK_KEY, homePick(d("2026-11-16"), today));
+    let html = home(s);
+    let hero = between(html, 'class="tile hero', "</a>");
+    expect(hero).toContain(`href="#/session/${lower.id}/2026-11-16"`);
+    expect(hero).toContain('aria-label="Logged"');
+    expect(hero).toContain(">Open</span>");
+    expect(hero).toContain('<div class="meta num">0 exercises</div>'); // no "last …": the check says it
+    expect(between(html, 'class="tile square', "</a>")).toContain(`href="#/session/${upper.id}/2026-11-16"`);
+
+    setViewState(HOME_PICK_KEY, homePick(d("2026-11-09"), today)); // last Monday, nothing logged
+    await cacheWeek(s, d("2026-11-09"));
+    html = home(s);
+    hero = between(html, 'class="tile hero', "</a>");
+    expect(hero).toContain(`href="#/session/${upper.id}/2026-11-09"`);
+    expect(hero).not.toContain('aria-label="Logged"');
+    expect(hero).toContain(">Log</span>");
+  });
+
+  it("calls a day with nothing planned or logged a rest day, with every workout as a square", async () => {
+    const s = makeServices();
+    await upperAndLower(s);
+    await cacheDays(s);
+    await cacheWeek(s, d("2026-11-16"));
+    setViewState(HOME_PICK_KEY, homePick(d("2026-11-22"), s.calendar.today())); // Sunday
+
+    const html = home(s);
+    expect(html).toContain('<div class="tile hero rest">');
+    expect(html).toContain("Rest day");
+    expect(html).not.toContain("Other workouts");
+    expect(html).toContain(">Workouts</span>");
+    expect(count(html, 'class="tile square')).toBe(2);
+    expect(html).toContain('style="--n:2;--n-wide:2"');
   });
 
   it("draws a week loaded ahead (the one next to it) with its plan and dots at once", async () => {

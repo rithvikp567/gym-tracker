@@ -848,6 +848,109 @@ button.list-row:active {
   color: var(--text-2);
 }
 
+/* Home: the picked day's workout as one big tile with its Start button (what was logged that
+   day, else what's planned), the other workouts as squares with just their names (D47). */
+.tile.hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 80px;
+  padding: 14px 14px 14px 20px;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out,
+    border-color var(--dur-fast) ease-out;
+}
+
+.hero-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.hero .name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.hero .meta {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.hero-go {
+  flex: none;
+  min-width: 76px;
+}
+
+.tile.hero.rest {
+  justify-content: center;
+  text-align: center;
+  padding-inline: 20px;
+}
+
+.hero.rest .name {
+  justify-content: center;
+}
+
+.hero.is-placeholder .hero-text {
+  visibility: hidden;
+}
+
+/* As many squares per row as gridColumns() says (--n on a phone, --n-wide from 600px); each is
+   at most --sq-max wide, and a short row is centered. */
+.square-grid {
+  --cols: var(--n);
+  --sq-gap: var(--row-tile-gap);
+  --sq-max: 124px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sq-gap);
+}
+
+@media (min-width: 600px) {
+  .square-grid {
+    --cols: var(--n-wide);
+    --sq-max: 168px;
+  }
+}
+
+.tile.square {
+  position: relative;
+  flex: 0 0 calc((100% - (var(--cols) - 1) * var(--sq-gap)) / var(--cols));
+  max-width: var(--sq-max);
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out,
+    border-color var(--dur-fast) ease-out;
+}
+
+/* A check in the corner, so the name stays in the middle. */
+.square .check-mark {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+}
+
+a.hero:active,
+a.square:active {
+  transform: scale(0.985);
+}
+
 .tag-planned {
   font-size: 12px;
   color: var(--accent-text);
@@ -869,10 +972,10 @@ button.list-row:active {
   visibility: hidden;
 }
 
-/* Rows still showing the last week on screen while the picked one loads: aria-busy at once,
-   data-stale (set by WorkoutRows after 150 ms) dims them, so fast loads never flicker. Not an
+/* Workouts still showing the last week on screen while the picked one loads: aria-busy at once,
+   data-stale (set after 150 ms) dims them, so fast loads never flicker. Not an
    animation: Reduce Motion turns those off, and only the fade should go then, not the dimming. */
-.home .list[data-stale] {
+.home-workouts[data-stale] {
   opacity: 0.45;
   transition: opacity 0.2s ease-out;
 }
@@ -2070,7 +2173,9 @@ form.add-row {
   }
 
   a.list-row:hover,
-  button.list-row:hover {
+  button.list-row:hover,
+  a.hero:hover,
+  a.square:hover {
     background: color-mix(in srgb, var(--text) 5%, var(--tile));
     border-color: color-mix(in srgb, var(--accent-solid) 60%, var(--tile-line));
   }
