@@ -701,7 +701,7 @@ button.list-row:active {
   position: fixed;
   inset: 0;
   z-index: 50;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--scrim);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -1598,7 +1598,7 @@ a.square:active {
 .month-pop-scrim {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--scrim);
 }
 
 .month-pop {
