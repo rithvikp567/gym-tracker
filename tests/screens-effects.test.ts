@@ -20,7 +20,8 @@ import { SocialService } from "../src/services/SocialService";
 import { TimerService } from "../src/services/TimerService";
 import { SetupService } from "../src/services/SetupService";
 import { CenterPage, useHoldBriefly, usePageHold } from "../src/ui/components/CenterBlock";
-import { Sheet } from "../src/ui/components/controls";
+import { Sheet, useSheetClose } from "../src/ui/components/controls";
+import { DateField } from "../src/ui/components/DateField";
 import { HOME_PICK_KEY, homePick, rememberHomeDay } from "../src/ui/homePick";
 import { useDayStep } from "../src/ui/hooks/useDayStep";
 import { HOLD_MS } from "../src/ui/hooks/useDragList";
@@ -917,6 +918,96 @@ describe("Sheet, mounted", () => {
     expect(onClose).not.toHaveBeenCalled();
     press(backdrop, backdrop);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("plays its closing animation before it closes, shrinking back into the button that opened it, and closes once", async () => {
+    const played: { cls: string | null; frames: Keyframe[] }[] = [];
+    let finish: () => void = () => {};
+    const finished = new Promise<void>((resolve) => (finish = resolve));
+    const proto = FakeElement.prototype as unknown as Record<string, unknown>;
+    const realBox = proto.getBoundingClientRect;
+    proto.animate = function (this: FakeElement, frames: Keyframe[]) {
+      played.push({ cls: this.getAttribute("class"), frames });
+      return { finished, cancel() {} };
+    };
+    const box = (left: number, top: number, width: number, height: number) => ({ left, top, width, height, right: left + width, bottom: top + height });
+    const opener = doc.createElement("button") as FakeElement;
+    doc.body.appendChild(opener);
+    opener.getBoundingClientRect = () => box(300, 140, 40, 32);
+    Object.defineProperty(proto, "isConnected", { configurable: true, get: () => true });
+    proto.getBoundingClientRect = function (this: FakeElement) {
+      return this.getAttribute("class") === "sheet" ? box(0, 400, 400, 400) : box(0, 0, 0, 0);
+    };
+    try {
+      const onClose = vi.fn();
+      function Done() {
+        const close = useSheetClose();
+        return createElement("button", { type: "button", className: "done", onClick: close }, "Done");
+      }
+      mount(createElement(Sheet, { title: "Timer", onClose, growFrom: opener as unknown as HTMLElement, children: createElement(Done) }));
+      // Opening: grows out of the button's box (scaled down to it, faded).
+      const grow = played.find((p) => p.cls === "sheet")!.frames;
+      expect(grow[0]).toMatchObject({ transform: "translate(300px, -260px) scale(0.1, 0.08)", opacity: 0 });
+
+      played.length = 0;
+      tap(one(doc.body, "done"));
+      pressKey("Escape"); // a second close while the first plays does nothing more
+      expect(onClose).not.toHaveBeenCalled(); // still playing
+      const shrink = played.find((p) => p.cls === "sheet")!.frames;
+      expect(shrink.at(-1)).toMatchObject({ transform: "translate(300px, -260px) scale(0.1, 0.08)", opacity: 0 });
+      expect(played.filter((p) => p.cls === "sheet")).toHaveLength(1);
+      finish();
+      await settle();
+      expect(onClose).toHaveBeenCalledTimes(1);
+    } finally {
+      delete proto.animate;
+      proto.getBoundingClientRect = realBox;
+      delete proto.isConnected;
+      doc.body.removeChild(opener);
+    }
+  });
+});
+
+describe("date picker, mounted", () => {
+  const field = (s: AppServices, date: string, onPick: (d: LocalDate) => void) =>
+    mount(createElement(ServicesProvider, { services: s, children: createElement(DateField, { date: d(date), onPick }) }));
+  /** A button in the open picker, by its label's start ("Wed, Nov 18", "Next month"). */
+  const labelled = (label: string) =>
+    findAll(one(doc.body, "sheet"), (el) => el.tagName === "BUTTON" && (el.getAttribute("aria-label") ?? "").startsWith(label))[0] ?? null;
+
+  it("opens the app's month with the day you're on in the accent, steps months, and goes to a picked date once it closes", async () => {
+    const s = makeServices();
+    const onPick = vi.fn();
+    const host = field(s, "2026-11-18", onPick);
+    const pill = one(host, "date-picker");
+    expect(pill.textContent).toContain("Wed, Nov 18 | Week 47");
+    tap(pill);
+    await settle();
+    const sheet = one(doc.body, "sheet");
+    expect(one(sheet, "date-sheet-title").textContent).toBe("November 2026");
+    expect(labelled("Wed, Nov 18")!.getAttribute("class")).toBe("cal-day selected");
+    expect(labelled("Wed, Nov 18")!.getAttribute("aria-pressed")).toBe("true");
+    expect(labelled("Fri, Nov 20")!.getAttribute("class")).toBe("cal-day today"); // today, Fri Nov 20
+
+    tap(labelled("Next month")!);
+    expect(one(sheet, "date-sheet-title").textContent).toBe("December 2026");
+    tap(labelled("Mon, Dec 7")!);
+    expect(onPick).toHaveBeenCalledWith(d("2026-12-07"));
+    expect(byClass(doc.body, "sheet")).toHaveLength(0);
+  });
+
+  it("closes without going anywhere when you pick the day you're on, and Today goes to today", async () => {
+    const s = makeServices();
+    const onPick = vi.fn();
+    const host = field(s, "2026-11-18", onPick);
+    tap(one(host, "date-picker"));
+    tap(labelled("Wed, Nov 18")!);
+    expect(onPick).not.toHaveBeenCalled();
+    expect(byClass(doc.body, "sheet")).toHaveLength(0);
+
+    tap(one(host, "date-picker"));
+    tap(findAll(one(doc.body, "date-sheet-foot"), (el) => el.tagName === "BUTTON" && el.textContent === "Today")[0]!);
+    expect(onPick).toHaveBeenCalledWith(d("2026-11-20"));
   });
 });
 

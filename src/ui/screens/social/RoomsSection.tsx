@@ -3,7 +3,7 @@ import type { Profile } from "../../../domain/social/Profile";
 import { Room } from "../../../domain/social/Room";
 import type { SocialOverview } from "../../../domain/social/SocialOverview";
 import { usePageHold } from "../../components/CenterBlock";
-import { Sheet } from "../../components/controls";
+import { Sheet, useSheetClose } from "../../components/controls";
 import { Icon } from "../../components/Icon";
 import { useAction } from "../../hooks/useAction";
 import { useServices } from "../../ServicesContext";
@@ -113,58 +113,72 @@ function RoomCard({ room, meId, friends }: { room: Room; meId: string; friends: 
 }
 
 function NewRoomSheet({ friends, onClose }: { friends: Profile[]; onClose: () => void }) {
-  const { social } = useServices();
-  const [name, setName] = useState("");
-  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
-  const { busy, error, setError, run } = useAction();
   return (
     <Sheet title="New room" onClose={onClose}>
-      <form
-        className="stack"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void run(async () => {
-            const result = await social.createRoom(name, [...picked]);
-            if (result.ok) onClose();
-            else setError(result.message);
-          });
-        }}
-      >
-        <input className="field" aria-label="Room name" placeholder="Room name" maxLength={Room.NAME_MAX} value={name} onChange={(e) => setName(e.target.value)} required />
-        <FriendPicker friends={friends} picked={picked} onChange={setPicked} empty="Add friends first to invite them. You can invite more later." />
-        {error && <div className="error-text">{error}</div>}
-        <button type="submit" className="btn primary" disabled={busy}>
-          Create room
-        </button>
-      </form>
+      <NewRoomForm friends={friends} />
     </Sheet>
   );
 }
 
-function InviteSheet({ room, friends, onClose }: { room: Room; friends: Profile[]; onClose: () => void }) {
+function NewRoomForm({ friends }: { friends: Profile[] }) {
   const { social } = useServices();
+  const close = useSheetClose();
+  const [name, setName] = useState("");
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const { busy, error, setError, run } = useAction();
+  return (
+    <form
+      className="stack"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void run(async () => {
+          const result = await social.createRoom(name, [...picked]);
+          if (result.ok) close();
+          else setError(result.message);
+        });
+      }}
+    >
+      <input className="field" aria-label="Room name" placeholder="Room name" maxLength={Room.NAME_MAX} value={name} onChange={(e) => setName(e.target.value)} required />
+      <FriendPicker friends={friends} picked={picked} onChange={setPicked} empty="Add friends first to invite them. You can invite more later." />
+      {error && <div className="error-text">{error}</div>}
+      <button type="submit" className="btn primary" disabled={busy}>
+        Create room
+      </button>
+    </form>
+  );
+}
+
+function InviteSheet({ room, friends, onClose }: { room: Room; friends: Profile[]; onClose: () => void }) {
+  return (
+    <Sheet title={`Invite to ${room.name}`} onClose={onClose}>
+      <InviteForm room={room} friends={friends} />
+    </Sheet>
+  );
+}
+
+function InviteForm({ room, friends }: { room: Room; friends: Profile[] }) {
+  const { social } = useServices();
+  const close = useSheetClose();
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const { busy, error, run } = useAction();
   return (
-    <Sheet title={`Invite to ${room.name}`} onClose={onClose}>
-      <div className="stack">
-        <FriendPicker friends={friends} picked={picked} onChange={setPicked} empty="All your friends are in this room." />
-        {error && <div className="error-text">{error}</div>}
-        <button
-          type="button"
-          className="btn primary"
-          disabled={busy || picked.size === 0}
-          onClick={() =>
-            void run(async () => {
-              await social.invite(room.id, [...picked]);
-              onClose();
-            })
-          }
-        >
-          Send invites
-        </button>
-      </div>
-    </Sheet>
+    <div className="stack">
+      <FriendPicker friends={friends} picked={picked} onChange={setPicked} empty="All your friends are in this room." />
+      {error && <div className="error-text">{error}</div>}
+      <button
+        type="button"
+        className="btn primary"
+        disabled={busy || picked.size === 0}
+        onClick={() =>
+          void run(async () => {
+            await social.invite(room.id, [...picked]);
+            close();
+          })
+        }
+      >
+        Send invites
+      </button>
+    </div>
   );
 }
 

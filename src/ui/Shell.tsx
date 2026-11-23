@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { CenterPage } from "./components/CenterBlock";
 import { Icon, type IconName } from "./components/Icon";
+import { trackPresses } from "./motion";
 import { pageOf, tabOf, type TabName } from "./pageLayout";
 import { href, type Route } from "./router";
 
@@ -30,6 +31,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     document.addEventListener("touchstart", noop, { passive: true });
     return () => document.removeEventListener("touchstart", noop);
   }, []);
+  // Sheets grow out of the button that opened them (D55).
+  useEffect(() => trackPresses(document), []);
 
   return (
     <div className="shell">

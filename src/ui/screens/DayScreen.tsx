@@ -1,6 +1,6 @@
 import { LocalDate } from "../../domain/LocalDate";
 import { BackButton } from "../components/controls";
-import { Icon } from "../components/Icon";
+import { DateField } from "../components/DateField";
 import { WorkoutRows } from "../components/WorkoutRows";
 import { navigate } from "../router";
 import { useLiveState, useServices } from "../ServicesContext";
@@ -60,21 +60,13 @@ export function DayScreen({ date: iso }: { date: string }) {
           <h1 className="session-name">{title}</h1>
         </div>
         <DayArrows onStep={stepDay}>
-          <label className="date-picker num">
-            {date.labelWithWeek()}
-            <Icon name="down" size={14} />
-            <input
-              type="date"
-              aria-label="Change date"
-              value={date.toString()}
-              onChange={(e) => {
-                if (!e.target.value) return;
-                const picked = LocalDate.tryParse(e.target.value) ?? date;
-                rememberHomeDay(picked, today);
-                navigate({ name: "day", date: picked.toString() }, { replace: true });
-              }}
-            />
-          </label>
+          <DateField
+            date={date}
+            onPick={(picked) => {
+              rememberHomeDay(picked, today);
+              navigate({ name: "day", date: picked.toString() }, { replace: true });
+            }}
+          />
         </DayArrows>
       </header>
 

@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { LocalDate } from "../../../domain/LocalDate";
 import { usePageHold } from "../../components/CenterBlock";
 import { BackButton } from "../../components/controls";
+import { DateField } from "../../components/DateField";
 import { Icon } from "../../components/Icon";
 import { useSwipe } from "../../hooks/useSwipe";
 import { href, navigate } from "../../router";
@@ -115,16 +116,7 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
           <h1 className="session-name">{day?.name ?? "\u00a0"}</h1>
         </div>
         <DayArrows onStep={stepDay}>
-          <label className="date-picker num">
-            {date.labelWithWeek()}
-            <Icon name="down" size={14} />
-            <input
-              type="date"
-              aria-label="Change date"
-              value={date.toString()}
-              onChange={(e) => e.target.value && goSession(LocalDate.tryParse(e.target.value) ?? date, null, true)}
-            />
-          </label>
+          <DateField date={date} onPick={(picked) => goSession(picked, null, true)} />
         </DayArrows>
         <div className="session-jumps" role="group" aria-label={`Other ${day?.name ?? "workout"} sessions`}>
           <button
