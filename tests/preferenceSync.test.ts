@@ -26,6 +26,7 @@ const supabase = vi.hoisted(() => {
   const query = {
     select: () => query,
     gt: () => query,
+      eq: () => query,
     order: () => query,
     range: async () => {
       await account.gate;
@@ -199,7 +200,7 @@ describe("SupabaseSync preferences", () => {
     vi.stubGlobal("navigator", { onLine: true });
     Object.assign(supabase.account, { metadata: {}, reads: 0, queries: 0, gate: null, failReads: false, failPulls: false, afterUpdate: null });
     settings = new SettingsService(memoryStore(), systemClock);
-    sync = new SupabaseSync("https://example.supabase.co", "key", new MemoryRecordStore(), () => {});
+    sync = new SupabaseSync(supabase.client as never, new MemoryRecordStore(), () => {});
     sync.attachPreferences(settings);
     supabase.signIn();
     await settle(); // signing in syncs once, which reads the account's settings
@@ -411,7 +412,7 @@ describe("SupabaseSync preferences", () => {
     expect(accountPrefs()?.values).toMatchObject({ theme: "graphite", showLastSession: false });
   });
 
-  it("brings a custom theme, accent, recent colors and the Progress unit picked on the phone to this device", async () => {
+  it("brings a custom theme, accent, recent colors, the Progress unit and the rest timer length picked on the phone to this device", async () => {
     const at = iso(start + 5_000);
     const values = {
       theme: "custom",
@@ -422,8 +423,9 @@ describe("SupabaseSync preferences", () => {
       recentAccentColors: ["#ff6a3dcc"],
       showLastSession: true,
       progressUnit: "kg",
+      restSeconds: 120,
     };
-    const keys = ["theme", "customThemeColor", "accent", "customAccentColor", "recentThemeColors", "recentAccentColors", "progressUnit"];
+    const keys = ["theme", "customThemeColor", "accent", "customAccentColor", "recentThemeColors", "recentAccentColors", "progressUnit", "restSeconds"];
     supabase.account.metadata.gym_tracker_prefs = { values, updatedAt: at, stamps: Object.fromEntries(keys.map((k) => [k, at])) };
     await sync.syncNow();
     expect(settings.get()).toEqual(values);

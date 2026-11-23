@@ -11,11 +11,13 @@ import { rememberHomeDay } from "../../homePick";
 import { ExerciseRow } from "./ExerciseRow";
 import { useDayStep } from "../../hooks/useDayStep";
 import { DayArrows } from "./DayArrows";
+import { TimerButton } from "../../timer/TimerButton";
 
 /**
  * A workout day on a date — the "cell" from the sheet.
  *  - ‹ › next to the date: the day before / after (whatever was logged or planned then).
  *  - Last / Next session (or swipe right / left): the previous / next time you did this workout.
+ *  - The clock after them: the rest timer and stopwatch (D54).
  */
 export function SessionScreen({ dayId, date: iso }: { dayId: string; date: string }) {
   const services = useServices();
@@ -145,6 +147,7 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
             Next session
             <Icon name="right" size={14} />
           </button>
+          <TimerButton />
         </div>
       </header>
 

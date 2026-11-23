@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppServices } from "../src/app/AppServices";
 import { MemoryRecordStore } from "../src/data/MemoryRecordStore";
+import { NoSocial } from "../src/data/NoSocial";
 import { NoSync } from "../src/data/NoSync";
 import { StoreRepositories } from "../src/data/StoreRepositories";
 import { Exercise } from "../src/domain/Exercise";
@@ -15,6 +16,8 @@ import { ImportService } from "../src/services/ImportService";
 import { ProgressService } from "../src/services/ProgressService";
 import { SessionService } from "../src/services/SessionService";
 import { SettingsService } from "../src/services/SettingsService";
+import { SocialService } from "../src/services/SocialService";
+import { TimerService } from "../src/services/TimerService";
 import { SetupService } from "../src/services/SetupService";
 import { CenterPage, useHoldBriefly, usePageHold } from "../src/ui/components/CenterBlock";
 import { Sheet } from "../src/ui/components/controls";
@@ -339,6 +342,8 @@ function makeServices(): AppServices {
   const clock = { now: () => new Date(2026, 10, 20, 12) }; // Fri Nov 20, 2026
   const repos = new StoreRepositories(new MemoryRecordStore(), clock);
   const prefs = new Map<string, string>();
+  const deviceStore = { get: (k: string) => prefs.get(k) ?? null, set: (k: string, v: string) => void prefs.set(k, v) };
+  const settings = new SettingsService(deviceStore, clock);
   return {
     mode: "device",
     changes: repos.changes,
@@ -348,8 +353,10 @@ function makeServices(): AppServices {
     progress: new ProgressService(repos, clock),
     imports: new ImportService(repos),
     backup: new BackupService(repos),
-    settings: new SettingsService({ get: (k) => prefs.get(k) ?? null, set: (k, v) => void prefs.set(k, v) }, clock),
+    settings,
     sync: new NoSync(),
+    social: new SocialService(new NoSocial(), repos, clock),
+    timer: new TimerService(deviceStore, settings, clock),
   };
 }
 

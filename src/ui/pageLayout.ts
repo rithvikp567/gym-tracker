@@ -1,7 +1,7 @@
 import type { Route } from "./router";
 
-/** The four places in the tab bar (phone) and the rail (computer). */
-export type TabName = "home" | "calendar" | "progress" | "settings";
+/** The five places in the tab bar (phone) and the rail (computer). */
+export type TabName = "home" | "calendar" | "progress" | "social" | "settings";
 
 /** Which tab a route belongs to: a workout or rest day lives under Home, Workout Days and Import under Settings. */
 export function tabOf(route: Route): TabName {
@@ -14,6 +14,8 @@ export function tabOf(route: Route): TabName {
       return "calendar";
     case "progress":
       return "progress";
+    case "social":
+      return "social";
     case "settings":
     case "setup":
     case "import":
@@ -27,7 +29,7 @@ export function tabOf(route: Route): TabName {
  * session, a swipe) slides the content below the header instead of switching pages, and the page
  * holds its place, so the arrows stay under your finger.
  */
-export type PageName = "home" | "workout" | "calendar" | "progress" | "settings" | "setup" | "import";
+export type PageName = "home" | "workout" | "calendar" | "progress" | "social" | "settings" | "setup" | "import";
 
 export function pageOf(route: Route): PageName {
   return route.name === "session" || route.name === "day" ? "workout" : route.name;

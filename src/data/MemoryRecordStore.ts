@@ -47,6 +47,11 @@ export class MemoryRecordStore implements RecordStore {
     }
   }
 
+  async clear(): Promise<void> {
+    this.tables.clear();
+    this.queue.clear();
+  }
+
   async getMeta(key: string): Promise<string | undefined> {
     return this.meta.get(key);
   }

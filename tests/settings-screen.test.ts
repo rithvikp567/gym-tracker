@@ -3,6 +3,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppServices } from "../src/app/AppServices";
 import { MemoryRecordStore } from "../src/data/MemoryRecordStore";
+import { NoSocial } from "../src/data/NoSocial";
 import { NoSync } from "../src/data/NoSync";
 import { StoreRepositories } from "../src/data/StoreRepositories";
 import { BackupService } from "../src/services/BackupService";
@@ -12,6 +13,8 @@ import type { SyncController } from "../src/services/ports";
 import { ProgressService } from "../src/services/ProgressService";
 import { SessionService } from "../src/services/SessionService";
 import { SettingsService } from "../src/services/SettingsService";
+import { SocialService } from "../src/services/SocialService";
+import { TimerService } from "../src/services/TimerService";
 import { SetupService } from "../src/services/SetupService";
 import { setViewState } from "../src/ui/hooks/useViewState";
 import { APPEARANCE_OPEN, SettingsScreen } from "../src/ui/screens/settings/SettingsScreen";
@@ -23,6 +26,8 @@ function makeServices(email: string | null = "someone@example.com"): AppServices
   const clock = { now: () => new Date(2026, 10, 20, 12) };
   const repos = new StoreRepositories(new MemoryRecordStore(), clock);
   const prefs = new Map<string, string>();
+  const deviceStore = { get: (k: string) => prefs.get(k) ?? null, set: (k: string, v: string) => void prefs.set(k, v) };
+  const settings = new SettingsService(deviceStore, clock);
   const sync: SyncController = Object.assign(new NoSync(), {
     configured: true,
     status: () => ({ state: "idle" as const, email, lastSyncedAt: null, message: null }),
@@ -36,8 +41,10 @@ function makeServices(email: string | null = "someone@example.com"): AppServices
     progress: new ProgressService(repos, clock),
     imports: new ImportService(repos),
     backup: new BackupService(repos),
-    settings: new SettingsService({ get: (k) => prefs.get(k) ?? null, set: (k, v) => void prefs.set(k, v) }, clock),
+    settings,
     sync,
+    social: new SocialService(new NoSocial(), repos, clock),
+    timer: new TimerService(deviceStore, settings, clock),
   };
 }
 

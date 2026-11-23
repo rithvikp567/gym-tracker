@@ -11,6 +11,8 @@ import type { Syncable } from "../src/domain/ids";
  */
 const server = vi.hoisted(() => {
   interface Row {
+    /** Rows put without one are the signed-in account's ("me"). */
+    user_id?: string;
     id: string;
     data: Record<string, unknown>;
     updated_at: string;
@@ -20,16 +22,19 @@ const server = vi.hoisted(() => {
   const tables = new Map<string, Map<string, Row>>();
   let clock = Date.parse("2026-11-18T09:00:00.000Z");
   let onAuth: (event: string, session: unknown) => void = () => {};
+  const authCalls: [string, unknown][] = [];
   const table = (name: string) => tables.get(name) ?? tables.set(name, new Map()).get(name)!;
   const query = (name: string) => {
     let since = "";
+    let owner: string | null = null;
     const q = {
       select: () => q,
+      eq: (_column: "user_id", value: string) => ((owner = value), q),
       gt: (_column: string, value: string) => ((since = value), q),
       order: () => q,
       range: async (from: number, to: number) => {
         const rows = [...table(name).values()]
-          .filter((r) => r.server_updated_at > since)
+          .filter((r) => r.server_updated_at > since && (owner === null || (r.user_id ?? "me") === owner))
           .sort((a, b) => (a.server_updated_at < b.server_updated_at ? -1 : a.server_updated_at > b.server_updated_at ? 1 : 0));
         return { data: structuredClone(rows.slice(from, to + 1)), error: null };
       },
@@ -48,14 +53,20 @@ const server = vi.hoisted(() => {
     auth: {
       onAuthStateChange: (callback: typeof onAuth) => void (onAuth = callback),
       getUser: async () => ({ data: { user: { id: "me", user_metadata: {} } }, error: null }),
-      updateUser: async () => ({ data: {}, error: null }),
+      updateUser: async (changes: unknown) => (authCalls.push(["updateUser", changes]), { data: {}, error: null }),
+      resetPasswordForEmail: async (email: string) => (authCalls.push(["resetPasswordForEmail", email]), { data: {}, error: null }),
+      verifyOtp: async (params: { token: string }) => (
+        authCalls.push(["verifyOtp", params]), { data: {}, error: params.token === "123456" ? null : { message: "Token has expired or is invalid" } }
+      ),
     },
     from: (name: string) => query(name),
   };
   return {
     client,
     tables,
-    signIn: () => onAuth("SIGNED_IN", { user: { id: "me", email: "me@example.com" } }),
+    signIn: (id = "me") => onAuth("SIGNED_IN", { user: { id, email: `${id}@example.com` } }),
+    signOut: () => onAuth("SIGNED_OUT", null),
+    authCalls,
     /** A copy another device uploaded. */
     put(name: string, record: Syncable) {
       table(name).set(record.id, {
@@ -103,11 +114,100 @@ describe("SupabaseSync records", () => {
   });
 
   async function signedIn(store: MemoryRecordStore): Promise<SupabaseSync> {
-    const sync = new SupabaseSync("https://example.supabase.co", "key", store, () => {});
+    const sync = new SupabaseSync(server.client as never, store, () => {});
     server.signIn();
     await settle(); // signing in syncs once
     return sync;
   }
+
+  it("pulls only its own rows, whatever else the database would let it read", async () => {
+    const store = new MemoryRecordStore();
+    server.tables.clear();
+    server.put("sessions", { ...filed, id: "friend:2026-11-18" });
+    server.tables.get("sessions")!.get("friend:2026-11-18")!.user_id = "friend";
+    server.put("sessions", dropped);
+    await signedIn(store);
+    expect((await store.getAll("sessions")).map((r) => r.id)).toEqual([ID]);
+  });
+
+  it("clears another account's data from this device before syncing a different account, and keeps data from before any sign-in", async () => {
+    const store = new MemoryRecordStore();
+    server.tables.clear();
+    await store.putMany("sessions", [filed], "local"); // logged while signed out
+    const sync = new SupabaseSync(server.client as never, store, () => {});
+    server.signIn("me");
+    await settle();
+    expect(server.get("sessions", ID)).toMatchObject({ logs: filed.logs }); // adopted and uploaded
+    expect(sync.userId()).toBe("me");
+
+    server.signOut();
+    await settle();
+    expect(await store.get("sessions", ID)).toBeDefined(); // signing out keeps it for when you're back
+    server.signIn("friend");
+    await settle();
+    expect([await store.getAll("sessions"), await store.outbox(), sync.userId()]).toEqual([[], [], "friend"]);
+
+    server.signOut();
+    await settle();
+    server.signIn("me");
+    await settle();
+    expect(await store.get("sessions", ID)).toMatchObject({ logs: filed.logs }); // back from the server
+  });
+
+  it("downloads everything again when an account comes back after another one used this device", async () => {
+    const store = new MemoryRecordStore();
+    server.tables.clear();
+    const OTHER = "upper:2026-11-19";
+    server.put("sessions", filed);
+    server.put("sessions", { ...filed, id: OTHER });
+    server.tables.get("sessions")!.get(OTHER)!.server_updated_at = "2030-01-01T00:00:00.000Z"; // the pull gets well past the first row
+    new SupabaseSync(server.client as never, store, () => {});
+    server.signIn("me");
+    await settle();
+    server.signIn("friend");
+    await settle();
+    expect(await store.getAll("sessions")).toEqual([]);
+    server.signIn("me");
+    await settle();
+    expect((await store.getAll("sessions")).map((r) => r.id).sort()).toEqual([ID, OTHER]);
+  });
+
+  it("syncs nothing while another account's data is being cleared, so none of it reaches the new account", async () => {
+    let finishClear: () => void = () => {};
+    class SlowClear extends MemoryRecordStore {
+      override async clear(): Promise<void> {
+        await new Promise<void>((resolve) => (finishClear = resolve));
+        await super.clear();
+      }
+    }
+    const store = new SlowClear();
+    server.tables.clear();
+    const sync = new SupabaseSync(server.client as never, store, () => {});
+    server.signIn("me");
+    await settle();
+    await store.putMany("sessions", [filed], "local"); // waiting to upload when the account changes
+    server.signIn("friend");
+    await settle();
+    await sync.syncNow(); // pressed while the switch is clearing
+    expect(server.get("sessions", ID)).toBeUndefined();
+    finishClear();
+    await settle();
+    expect([await store.outbox(), sync.userId(), server.get("sessions", ID)]).toEqual([[], "friend", undefined]);
+  });
+
+  it("sets a new password with the emailed code", async () => {
+    const sync = new SupabaseSync(server.client as never, new MemoryRecordStore(), () => {});
+    server.authCalls.length = 0;
+    await sync.requestPasswordReset(" me@example.com ");
+    await expect(sync.resetPassword("me@example.com", "000000", "new-password")).rejects.toThrow("That code is wrong or has expired. Ask for a new one.");
+    await sync.resetPassword("me@example.com", " 123456 ", "new-password");
+    expect(server.authCalls).toEqual([
+      ["resetPasswordForEmail", "me@example.com"],
+      ["verifyOtp", { email: "me@example.com", token: "000000", type: "recovery" }],
+      ["verifyOtp", { email: "me@example.com", token: "123456", type: "recovery" }],
+      ["updateUser", { password: "new-password" }],
+    ]);
+  });
 
   it("uploads this device's copy again when it wins a tie the server lost, so every copy ends on it", async () => {
     const store = new MemoryRecordStore();

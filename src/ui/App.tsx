@@ -10,10 +10,12 @@ import { ImportScreen } from "./screens/ImportScreen";
 const ProgressScreen = lazy(() => import("./screens/progress/ProgressScreen").then((m) => ({ default: m.ProgressScreen })));
 import { SessionScreen } from "./screens/session/SessionScreen";
 import { SettingsScreen } from "./screens/settings/SettingsScreen";
+import { SocialScreen } from "./screens/social/SocialScreen";
 import { SetupScreen } from "./screens/SetupScreen";
 import { LookSync } from "./LookSync";
 import { ServicesProvider } from "./ServicesContext";
 import { Shell } from "./Shell";
+import { TimerAlarm } from "./timer/TimerAlarm";
 
 function Screen({ route }: { route: Route }) {
   switch (route.name) {
@@ -34,6 +36,8 @@ function Screen({ route }: { route: Route }) {
       );
     case "setup":
       return <SetupScreen key={route.dayId ?? ""} openDayId={route.dayId} />;
+    case "social":
+      return <SocialScreen />;
     case "settings":
       return <SettingsScreen />;
     case "import":
@@ -48,6 +52,7 @@ export function App({ services }: { services: AppServices }) {
   return (
     <ServicesProvider services={services}>
       <LookSync />
+      <TimerAlarm />
       <Shell route={route}>
         <Screen route={route} />
       </Shell>

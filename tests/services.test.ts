@@ -975,6 +975,7 @@ describe("SettingsService", () => {
     recentAccentColors: [],
     showLastSession: true,
     progressUnit: "lb",
+    restSeconds: 90,
   };
   const UNTOUCHED = Object.fromEntries(Object.keys(DEFAULT_VALUES).map((k) => [k, EPOCH]));
 

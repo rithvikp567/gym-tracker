@@ -23,6 +23,18 @@ export class NoSync implements SyncController {
     throw new Error("Sync isn't set up for this site yet.");
   }
 
+  async requestPasswordReset(): Promise<void> {
+    throw new Error("Sync isn't set up for this site yet.");
+  }
+
+  async resetPassword(): Promise<void> {
+    throw new Error("Sync isn't set up for this site yet.");
+  }
+
+  userId(): string | null {
+    return null;
+  }
+
   /** Nothing to sync with: preferences stay on this device. */
   attachPreferences(): void {}
 
