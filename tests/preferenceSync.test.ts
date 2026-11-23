@@ -411,7 +411,7 @@ describe("SupabaseSync preferences", () => {
     expect(accountPrefs()?.values).toMatchObject({ theme: "graphite", showLastSession: false });
   });
 
-  it("brings a custom theme, accent and recent colors picked on the phone to this device", async () => {
+  it("brings a custom theme, accent, recent colors and the Progress unit picked on the phone to this device", async () => {
     const at = iso(start + 5_000);
     const values = {
       theme: "custom",
@@ -421,8 +421,9 @@ describe("SupabaseSync preferences", () => {
       recentThemeColors: ["#1e2a44", "#3b2f4a"],
       recentAccentColors: ["#ff6a3dcc"],
       showLastSession: true,
+      progressUnit: "kg",
     };
-    const keys = ["theme", "customThemeColor", "accent", "customAccentColor", "recentThemeColors", "recentAccentColors"];
+    const keys = ["theme", "customThemeColor", "accent", "customAccentColor", "recentThemeColors", "recentAccentColors", "progressUnit"];
     supabase.account.metadata.gym_tracker_prefs = { values, updatedAt: at, stamps: Object.fromEntries(keys.map((k) => [k, at])) };
     await sync.syncNow();
     expect(settings.get()).toEqual(values);

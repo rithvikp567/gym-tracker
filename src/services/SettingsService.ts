@@ -1,4 +1,5 @@
 import { EPOCH } from "../domain/ids";
+import type { WeightUnit } from "../domain/Load";
 import { Emitter, type Unsubscribe } from "../lib/Emitter";
 import { systemClock, type Clock, type KeyValueStore, type PreferencesSnapshot, type SyncedPreferences } from "./ports";
 
@@ -58,6 +59,8 @@ export interface Settings {
   recentAccentColors: string[];
   /** Show "last 130 · 8/8/7" under each exercise while logging. */
   showLastSession: boolean;
+  /** Progress charts every weight in pounds or kilograms, whatever it was logged in (D52). */
+  progressUnit: WeightUnit;
 }
 
 const DEFAULTS: Settings = {
@@ -68,6 +71,7 @@ const DEFAULTS: Settings = {
   recentThemeColors: [],
   recentAccentColors: [],
   showLastSession: true,
+  progressUnit: "lb",
 };
 const SETTING_KEYS = Object.keys(DEFAULTS) as (keyof Settings)[];
 const KEY = "gym-tracker.settings";
@@ -214,6 +218,7 @@ function sanitize(values: Partial<Record<keyof Settings, unknown>>): Settings {
     recentThemeColors: cleanColors(values.recentThemeColors),
     recentAccentColors: cleanColors(values.recentAccentColors, cleanAccentColor),
     showLastSession: typeof values.showLastSession === "boolean" ? values.showLastSession : DEFAULTS.showLastSession,
+    progressUnit: values.progressUnit === "kg" || values.progressUnit === "lb" ? values.progressUnit : DEFAULTS.progressUnit,
   };
 }
 
@@ -226,6 +231,7 @@ const READABLE: { [K in keyof Settings]: (value: unknown) => boolean } = {
   recentThemeColors: Array.isArray,
   recentAccentColors: Array.isArray,
   showLastSession: (v) => typeof v === "boolean",
+  progressUnit: (v) => v === "lb" || v === "kg",
 };
 
 /**

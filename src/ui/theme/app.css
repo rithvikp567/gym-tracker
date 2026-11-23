@@ -1327,6 +1327,55 @@ a.square:active {
   padding: 0 12px;
 }
 
+/* lb | kg after the editor's buttons, as tall as they are: the unit the weights are typed in (D52). */
+.unit-switch {
+  display: inline-flex;
+  gap: 2px;
+  min-height: 36px;
+  padding: 3px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius);
+}
+
+.unit-switch button {
+  min-width: 34px;
+  padding: 0 8px;
+  border-radius: calc(var(--radius) - 4px);
+  font-size: 14px;
+  color: var(--text-2);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out;
+}
+
+.unit-switch button:active {
+  transform: scale(0.94);
+}
+
+.unit-switch button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+/* + Set, Same as <date> and lb | kg need 319 px as drawn above; a 375 px phone's editor has 309.
+   A little less padding fits them on one row (about 295 px). */
+@media (max-width: 430px) {
+  .editor-actions {
+    gap: 6px;
+  }
+
+  .editor-actions .btn {
+    gap: 6px;
+    padding: 0 10px;
+  }
+
+  .unit-switch button {
+    min-width: 30px;
+    padding: 0 7px;
+  }
+}
+
 .done-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1680,9 +1729,29 @@ a.square:active {
 }
 
 /* The title on its own tile, like Calendar's year tile. */
+/* "Progress" on the left, the lb | kg switch on the right (D52). */
 .screen-head.progress-head {
   margin-bottom: 0;
   padding: 10px 16px 14px;
+  text-align: left;
+}
+
+.screen-head.progress-head.has-actions {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.screen-head.progress-head.has-actions .head-text {
+  grid-column: 1;
+}
+
+.screen-head.progress-head .head-actions {
+  grid-column: 2;
+  align-self: center;
+  margin-top: 0;
+}
+
+.progress-head .segmented button {
+  min-width: 44px;
 }
 
 .progress-controls {

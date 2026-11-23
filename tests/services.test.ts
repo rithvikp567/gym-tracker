@@ -439,6 +439,46 @@ describe("ProgressService", () => {
     const [line] = (await new ProgressService(repos, clock).lines(day.id, "1M")).lines;
     expect(line!.points[0]).toMatchObject({ weight: 270, label: "3 pl", summary: "2.5/3 pl (270 lb) · 10/8" });
   });
+
+  it("charts every weight in kilograms or pounds, whatever it was logged in", async () => {
+    const { day, pull } = await upperDay();
+    let lower = await setup.createDay("Lower");
+    lower = (await setup.updateDay(lower.id, (x) => x.addExercise("Leg press")))!;
+    const press = lower.activeExercises()[0]!;
+    await setup.setUnit(lower.id, press.id, "plates", "relabel");
+    await sessions.saveLog(day.id, d("2026-11-09"), ExerciseLog.empty(pull.id).withSets(sets(185, 6))); // saved without a unit: pounds
+    await sessions.saveLog(day.id, d("2026-11-16"), ExerciseLog.empty(pull.id).withSets(sets(80, 8)).withUnit("kg"));
+    await sessions.saveLog(lower.id, d("2026-11-17"), ExerciseLog.empty(press.id).withSets(sets(2.5, 10)).withUnit("plates"));
+    const progress = new ProgressService(repos, clock);
+    const point = async (dayId: string, unit: "lb" | "kg") =>
+      (await progress.lines(dayId, "1M", unit)).lines[0]!.points.map((p) => [p.weight, p.label, p.summary]);
+
+    expect(await point(day.id, "kg")).toEqual([
+      [84, "84", "185 lb (84 kg) · 6"],
+      [80, "80", "80 kg · 8"],
+    ]);
+    expect(await point(day.id, "lb")).toEqual([
+      [185, "185", "185 · 6"],
+      [176.5, "176.5", "80 kg (176.5 lb) · 8"],
+    ]);
+    expect(await point(lower.id, "kg")).toEqual([[104.5, "2.5 pl", "2.5 pl (104.5 kg) · 10"]]);
+  });
+});
+
+describe("Kilograms while logging", () => {
+  it("saves the kg / lb switch on the workout day from that exercise down, converting nothing", async () => {
+    const { day, pull, tri } = await upperDay();
+    await sessions.saveLog(day.id, d("2026-11-16"), ExerciseLog.empty(tri.id).withSets(sets(50, 10))); // pounds, saved without a unit
+    await setup.setWeightUnitFrom(day.id, pull.id, "kg");
+    const units = async () => (await setup.days())[0]!.activeExercises().map((e) => e.unit);
+    expect(await units()).toEqual(["kg", "kg"]);
+    // Triceps' Nov 16 is still pounds.
+    const history = await sessions.history(day.id);
+    const triceps = (await setup.days())[0]!.exercise(tri.id)!;
+    expect(history[0]!.log(tri.id)?.summary(" · ", triceps.bareUnit)).toBe("50 · 10");
+    await setup.setWeightUnitFrom(day.id, tri.id, "lb");
+    expect(await units()).toEqual(["kg", "lb"]);
+  });
 });
 
 describe("ImportService", () => {
@@ -934,6 +974,7 @@ describe("SettingsService", () => {
     recentThemeColors: [],
     recentAccentColors: [],
     showLastSession: true,
+    progressUnit: "lb",
   };
   const UNTOUCHED = Object.fromEntries(Object.keys(DEFAULT_VALUES).map((k) => [k, EPOCH]));
 

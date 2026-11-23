@@ -1,6 +1,7 @@
-import type { KeyboardEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 import type { Exercise } from "../../../domain/Exercise";
 import type { ExerciseLog } from "../../../domain/ExerciseLog";
+import type { LoadUnit, WeightUnit } from "../../../domain/Load";
 import type { PastLog } from "../../../services/SessionService";
 import { Icon } from "../../components/Icon";
 import { ExerciseEditor } from "./ExerciseEditor";
@@ -16,13 +17,15 @@ interface Props {
   noteOpen: boolean;
   onToggleNote: () => void;
   onSave: (log: ExerciseLog) => void;
+  /** The lb / kg switch in its editor was flipped. */
+  onUnit: (unit: WeightUnit) => void;
 }
 
 /**
  * One exercise in a session. Collapsed: name, target (3×8), last time, weight, reps.
  * Tap to open the editor; tap the note icon to peek at that day's note.
  */
-export function ExerciseRow({ exercise, log, last, showLast, open, onToggle, noteOpen, onToggleNote, onSave }: Props) {
+export function ExerciseRow({ exercise, log, last, showLast, open, onToggle, noteOpen, onToggleNote, onSave, onUnit }: Props) {
   const note = log?.note.trim() ?? "";
   const isCheck = exercise.kind === "check";
 
@@ -36,8 +39,15 @@ export function ExerciseRow({ exercise, log, last, showLast, open, onToggle, not
         : ""
     : (log?.weightLabel(exercise.bareUnit) ?? "");
   const target = exercise.targetLabel();
+  // The unit weights are typed in that day: the day's own once it has weights, else the exercise's.
+  // A flip of the switch shows at once; once it's saved (or a switch above changes this row too),
+  // the saved unit takes over.
+  const saved: LoadUnit = log && log.topWeight() !== null ? log.unitOr(exercise.bareUnit) : exercise.unit;
+  const [picked, setPicked] = useState<{ unit: LoadUnit; over: LoadUnit } | null>(null);
+  const unit = picked && picked.over === saved ? picked.unit : saved;
   // Phone: "2×8 | Last: 20 – 8/6/6". Desktop shows the same value in its own column, minus "Last:".
-  const lastText = last ? last.log.summary(" – ", exercise.bareUnit) : "";
+  // Last time's weights are shown in that unit, whatever they were saved in (185 lb → 84 kg).
+  const lastText = last ? last.log.inUnit(unit, exercise.bareUnit).summary(" – ", exercise.bareUnit) : "";
 
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -84,7 +94,16 @@ export function ExerciseRow({ exercise, log, last, showLast, open, onToggle, not
       {noteOpen && note && !open && <div className="ex-note-view">{note}</div>}
       {open && (
         <div className="ex-editor" onClick={(e) => e.stopPropagation()}>
-          <ExerciseEditor exercise={exercise} log={log} last={last} onSave={onSave} />
+          <ExerciseEditor
+            exercise={exercise}
+            log={log}
+            last={last}
+            onSave={onSave}
+            onUnit={(next) => {
+              setPicked({ unit: next, over: saved });
+              onUnit(next);
+            }}
+          />
         </div>
       )}
     </div>

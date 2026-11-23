@@ -185,6 +185,7 @@ export function SessionScreen({ dayId, date: iso }: { dayId: string; date: strin
                       noteOpen={noteIds.has(ex.id)}
                       onToggleNote={() => toggleNote(ex.id)}
                       onSave={(log) => void services.sessions.saveLog(dayId, date, log)}
+                      onUnit={(unit) => void services.setup.setWeightUnitFrom(dayId, ex.id, unit)}
                     />
                   ))}
                 </div>

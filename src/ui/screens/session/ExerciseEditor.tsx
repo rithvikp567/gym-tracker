@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Exercise } from "../../../domain/Exercise";
 import { ExerciseLog } from "../../../domain/ExerciseLog";
-import { HALF_PLATE_LB, PLATE_LB, convertLoad, platesToPounds, unitName, type LoadUnit } from "../../../domain/Load";
+import { HALF_PLATE_LB, PLATE_LB, convertLoad, platesToPounds, unitName, type LoadUnit, type WeightUnit } from "../../../domain/Load";
 import { SetEntry, formatNumber } from "../../../domain/SetEntry";
 import type { PastLog } from "../../../services/SessionService";
 import { Icon } from "../../components/Icon";
@@ -38,26 +38,34 @@ function toLog(exerciseId: string, draft: Draft, unit: LoadUnit | undefined): Ex
   return ExerciseLog.empty(exerciseId).withSets(sets).withDone(draft.done).withNote(draft.note).withUnit(unit);
 }
 
-/** Editing one exercise: sets (weight × reps), done/skipped for cardio, and the day's note. */
+const WEIGHT_UNITS: readonly WeightUnit[] = ["lb", "kg"];
+
+/**
+ * Editing one exercise: sets (weight × reps), done/skipped for cardio, and the day's note.
+ * `onUnit`: the lb / kg switch was flipped (the screen switches the exercises below too, D52).
+ */
 export function ExerciseEditor({
   exercise,
   log,
   last,
   onSave,
+  onUnit,
 }: {
   exercise: Exercise;
   log: ExerciseLog | undefined;
   last: PastLog | undefined;
   onSave: (log: ExerciseLog) => void;
+  onUnit?: (unit: WeightUnit) => void;
 }) {
   const [draft, setDraft] = useState(() => toDraft(exercise, log, last));
   const save = useDebounced(onSave, 400);
   // Weights are edited in the unit this day's weights were saved in, so switching the exercise's
   // unit never changes what an earlier day's numbers mean; a day without weights yet takes the
-  // exercise's. Decided when the editor opens: clearing a weight mid-edit doesn't switch it.
-  const [unit] = useState<LoadUnit>(() => (log && log.topWeight() !== null ? log.unitOr(exercise.bareUnit) : exercise.unit));
+  // exercise's. Decided when the editor opens: clearing a weight mid-edit doesn't switch it; only
+  // the lb / kg switch does.
+  const [unit, setUnit] = useState<LoadUnit>(() => (log && log.topWeight() !== null ? log.unitOr(exercise.bareUnit) : exercise.unit));
   const plates = unit === "plates";
-  const unitPlaceholder = plates ? "plates" : "lb";
+  const unitPlaceholder = plates ? "plates" : unit;
   const lastSets = last?.log.filledSets() ?? [];
   const lastUnit = last?.log.unitOr(exercise.bareUnit) ?? unit;
   /** Last time's weight in this editor's unit; null when it can't be said exactly (pounds → plates). */
@@ -72,6 +80,15 @@ export function ExerciseEditor({
     // Done / not done saves the unit too: a day logged as weight × reps keeps its weights when the
     // exercise is switched over (a log without weights never keeps a unit, see ExerciseLog).
     save(toLog(exercise.id, next, unit));
+  };
+
+  // The switch says what the numbers are typed in: last time's placeholders convert, and weights
+  // already typed here stay as typed, now in the new unit (D52).
+  const switchUnit = (next: WeightUnit) => {
+    if (next === unit) return;
+    setUnit(next);
+    if (draft.sets.some((s) => parse(s.weight) !== null)) save(toLog(exercise.id, draft, next));
+    onUnit?.(next);
   };
 
   const setWeight = (i: number, value: string) => {
@@ -150,7 +167,7 @@ export function ExerciseEditor({
         </div>
       ))}
       {plates && <PlatesHint value={parse(draft.sets.find((x) => x.weight.trim())?.weight ?? "")} />}
-      {!plates && unit !== exercise.unit && <p className="plates-hint">Saved in {unitName(unit)}, not {unitName(exercise.unit)}</p>}
+      {!plates && exercise.unit === "plates" && <p className="plates-hint">Saved in {unitName(unit)}, not plates</p>}
       <div className="editor-actions">
         <button type="button" className="btn" onClick={addSet}>
           <Icon name="plus" size={16} /> Set
@@ -159,6 +176,15 @@ export function ExerciseEditor({
           <button type="button" className="btn" onClick={copyLast}>
             <Icon name="copy" size={16} /> Same {weightsCopy ? "as" : "reps as"} {last.date.shortLabel()}
           </button>
+        )}
+        {!plates && (
+          <div className="unit-switch" role="group" aria-label="Weight unit">
+            {WEIGHT_UNITS.map((u) => (
+              <button key={u} type="button" aria-pressed={unit === u} onClick={() => switchUnit(u)}>
+                {u}
+              </button>
+            ))}
+          </div>
         )}
       </div>
       {noteField}

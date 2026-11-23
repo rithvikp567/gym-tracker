@@ -1,6 +1,6 @@
 import { Exercise, type ExerciseData, type ExerciseKind } from "./Exercise";
 import { EPOCH, newId, type Syncable } from "./ids";
-import type { LoadUnit } from "./Load";
+import type { LoadUnit, WeightUnit } from "./Load";
 
 /** An exercise merged into another or deleted. Only its id is kept, as a tombstone. */
 export interface RetiredExercise {
@@ -165,6 +165,23 @@ export class WorkoutDay {
     const into = this.exercise(intoId);
     if (!from || !into || fromId === intoId) return this;
     return this.withExercise(into.withNamesOf(from)).retire({ id: fromId, mergedInto: intoId, unit: from.bareUnit });
+  }
+
+  /**
+   * Weights typed in `unit` from this exercise down (the kg / lb switch while logging): the
+   * exercise and every active one after it, so switching the first to kg switches the rest, and
+   * switching the third back to lb switches the third onward. Plates exercises and done / not done
+   * ones have no pounds or kilos to switch and are passed over; exercises above aren't touched.
+   * Weights logged so far keep their unit ("keep", see Exercise.withUnit). An archived exercise
+   * (shown because it was logged that day) switches alone. The same day comes back when nothing changes.
+   */
+  withWeightUnitFrom(exerciseId: string, unit: WeightUnit): WorkoutDay {
+    const active = this.activeExercises();
+    const start = active.findIndex((e) => e.id === exerciseId);
+    const own = this.exercise(exerciseId);
+    const targets = start >= 0 ? active.slice(start) : own ? [own] : [];
+    const switching = targets.filter((e) => e.kind === "strength" && e.unit !== "plates" && e.unit !== unit);
+    return switching.reduce<WorkoutDay>((day, e) => day.withExercise(e.withUnit(unit, "keep")), this);
   }
 
   /**

@@ -1133,6 +1133,46 @@ describe("ExerciseEditor units, mounted", () => {
     expect([lastSaved(onSave).unit, lastSaved(onSave).topWeight()]).toEqual(["lb", 380]);
   });
 
+  it("switches between lb and kg: last time's numbers convert, weights typed stay as typed", async () => {
+    const pull = Exercise.create("Lat pulldown");
+    const onSave = vi.fn();
+    const onUnit = vi.fn();
+    const last = { date: LocalDate.parse("2026-10-12"), log: ExerciseLog.empty(pull.id).withSets([new SetEntry(185, 6), new SetEntry(175, 6)]) };
+    const host = mount(createElement(ExerciseEditor, { exercise: pull, log: undefined, last, onSave, onUnit }));
+    const unitButton = (unit: string) => {
+      const [group] = findAll(host, (el) => el.getAttribute("aria-label") === "Weight unit");
+      const [el] = findAll(group!, (b) => b.tagName === "BUTTON" && b.textContent === unit);
+      return el!;
+    };
+    const press = (el: FakeElement) => {
+      const props = Object.entries(el).find(([k]) => k.startsWith("__reactProps$"))![1] as { onClick: () => void };
+      act(() => props.onClick());
+    };
+    expect(unitButton("lb").getAttribute("aria-pressed")).toBe("true");
+    expect(field(host, "Set 2 weight").getAttribute("placeholder")).toBe("175");
+
+    press(unitButton("kg"));
+    expect(unitButton("kg").getAttribute("aria-pressed")).toBe("true");
+    expect(onUnit).toHaveBeenLastCalledWith("kg");
+    expect([1, 2].map((n) => field(host, `Set ${n} weight`).getAttribute("placeholder"))).toEqual(["84", "79.5"]);
+    await settle(450);
+    expect(onSave).not.toHaveBeenCalled(); // nothing typed, nothing to save
+
+    type(field(host, "Set 1 weight"), "80");
+    await settle(450);
+    expect([lastSaved(onSave).unit, lastSaved(onSave).topWeight()]).toEqual(["kg", 80]);
+    // Typed in kilos by mistake: back to lb, and the 80 is pounds.
+    press(unitButton("lb"));
+    await settle(450);
+    expect([lastSaved(onSave).unit, lastSaved(onSave).topWeight()]).toEqual(["lb", 80]);
+    expect(onUnit).toHaveBeenLastCalledWith("lb");
+  });
+
+  it("has no lb / kg switch on a plates exercise", () => {
+    const host = mount(createElement(ExerciseEditor, { exercise: platesPress(), log: undefined, last: undefined, onSave: vi.fn() }));
+    expect(findAll(host, (el) => el.getAttribute("aria-label") === "Weight unit")).toEqual([]);
+  });
+
   it("has no remove-set button: clearing a set's numbers leaves it out of what's saved", async () => {
     const bench = Exercise.create("Bench press");
     const onSave = vi.fn();

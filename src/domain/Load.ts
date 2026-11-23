@@ -3,9 +3,15 @@ import { formatNumber } from "./SetEntry";
 /**
  * How an exercise's weight is written down:
  *   lb      – pounds on the stack or bar (the default)
+ *   kg      – kilograms (a gym abroad, or kilo dumbbells next to pound machines)
  *   plates  – 45 lb plates on ONE side, with .5 meaning a 25 lb plate (leg press, hack squat…)
  */
-export type LoadUnit = "lb" | "plates";
+export type LoadUnit = "lb" | "kg" | "plates";
+
+/** The two units a weight can be typed or charted in (plates are only ever typed on their own exercise). */
+export type WeightUnit = "lb" | "kg";
+
+export const KG_PER_LB = 0.45359237;
 
 export const PLATE_LB = 45;
 export const HALF_PLATE_LB = 25;
@@ -24,26 +30,36 @@ export function platesToPounds(platesPerSide: number): number {
   return Math.round(2 * (whole * PLATE_LB + toHalf + toWhole) * 100) / 100;
 }
 
+/** To the nearest half: what a gym's weights can show (2.5 kg / 1.25 kg plates, 2.5 lb steps). */
+function toHalf(n: number): number {
+  return Math.round(n * 2) / 2;
+}
+
 /**
- * A weight in another unit, when that's exact: plates → pounds converts; pounds → plates gives
- * null, because which plates make up a weight is a guess.
+ * A weight in another unit, or null when that would be a guess. Plates → pounds is exact;
+ * pounds ⇄ kilograms (and plates → kilograms, through pounds) round to the nearest half, so
+ * 185 lb reads 84 kg and 80 kg reads 176.5 lb. Nothing becomes plates: which plates make up a
+ * weight is a guess.
  */
 export function convertLoad(value: number, from: LoadUnit, to: LoadUnit): number | null {
   if (from === to) return value;
-  return from === "plates" && to === "lb" ? platesToPounds(value) : null;
+  if (to === "plates") return null;
+  const pounds = from === "plates" ? platesToPounds(value) : from === "kg" ? value / KG_PER_LB : value;
+  if (to === "lb") return from === "plates" ? pounds : toHalf(pounds);
+  return toHalf(pounds * KG_PER_LB);
 }
 
-/** The unit as a suffix after a weight label: "" for pounds, " pl" for plates. */
+/** The unit as a suffix after a weight label: "" for pounds, " kg", " pl" for plates. */
 export function unitSuffix(unit: LoadUnit): string {
-  return unit === "plates" ? " pl" : "";
+  return unit === "plates" ? " pl" : unit === "kg" ? " kg" : "";
 }
 
-/** "185" or "2.5 pl". */
+/** "185", "84 kg" or "2.5 pl". */
 export function formatLoad(value: number, unit: LoadUnit): string {
   return `${formatNumber(value)}${unitSuffix(unit)}`;
 }
 
-/** "pounds" or "plates", for sentences. */
+/** "pounds", "kilograms" or "plates", for sentences. */
 export function unitName(unit: LoadUnit): string {
-  return unit === "plates" ? "plates" : "pounds";
+  return unit === "plates" ? "plates" : unit === "kg" ? "kilograms" : "pounds";
 }
