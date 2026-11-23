@@ -3,6 +3,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppServices } from "../src/app/AppServices";
 import { MemoryRecordStore } from "../src/data/MemoryRecordStore";
+import { NoSocial } from "../src/data/NoSocial";
 import { NoSync } from "../src/data/NoSync";
 import { StoreRepositories } from "../src/data/StoreRepositories";
 import { ExerciseLog } from "../src/domain/ExerciseLog";
@@ -14,6 +15,8 @@ import { ImportService } from "../src/services/ImportService";
 import { ProgressService } from "../src/services/ProgressService";
 import { SessionService } from "../src/services/SessionService";
 import { SettingsService } from "../src/services/SettingsService";
+import { SocialService } from "../src/services/SocialService";
+import { TimerService } from "../src/services/TimerService";
 import { SetupService } from "../src/services/SetupService";
 import type { SyncController, SyncState } from "../src/services/ports";
 import { HOME_PICK_KEY, homePick, homeWeek, weekRangeLabel } from "../src/ui/homePick";
@@ -38,6 +41,8 @@ function makeServices(now = new Date(2026, 10, 20, 12), options: { mode?: AppSer
   const clock = { now: () => now };
   const repos = new StoreRepositories(new MemoryRecordStore(), clock);
   const prefs = new Map<string, string>();
+  const deviceStore = { get: (k: string) => prefs.get(k) ?? null, set: (k: string, v: string) => void prefs.set(k, v) };
+  const settings = new SettingsService(deviceStore, clock);
   return {
     mode: options.mode ?? "device",
     changes: repos.changes,
@@ -47,8 +52,10 @@ function makeServices(now = new Date(2026, 10, 20, 12), options: { mode?: AppSer
     progress: new ProgressService(repos, clock),
     imports: new ImportService(repos),
     backup: new BackupService(repos),
-    settings: new SettingsService({ get: (k) => prefs.get(k) ?? null, set: (k, v) => void prefs.set(k, v) }, clock),
+    settings,
     sync: options.sync ? syncIn(options.sync) : new NoSync(),
+    social: new SocialService(new NoSocial(), repos, clock),
+    timer: new TimerService(deviceStore, settings, clock),
   };
 }
 
@@ -390,6 +397,20 @@ describe("Workout and rest-day headers", () => {
     const html = render(s, SessionScreen, { dayId: upper.id, date: "2026-11-20" });
     expect(html).toMatch(/class="session-top"><a class="icon-btn"[^>]*aria-label="Back"[\s\S]*<h1 class="session-name">Upper 1<\/h1><\/div>/);
     expect(html).toMatch(/aria-label="Previous day"[\s\S]*Fri, Nov 20 \| Week 47[\s\S]*aria-label="Next day"[\s\S]*class="session-jumps"/);
+    // The timer's clock sits right after Next session (D54); nothing counting, so just the icon.
+    expect(html).toMatch(/Next session<svg[\s\S]*?<\/button><button type="button" class="jump-btn timer-btn" aria-label="Timer" aria-haspopup="dialog"><svg/);
+  });
+
+  it("shows the rest timer's time left on the clock while it counts, and time's up when it's done", async () => {
+    const s = makeServices();
+    const { upper } = await upperAndLower(s);
+    await cacheDays(s);
+    await cacheSession(s, upper.id, d("2026-11-20"));
+    s.timer.setRestLength(60);
+    s.timer.start("rest");
+    expect(render(s, SessionScreen, { dayId: upper.id, date: "2026-11-20" })).toContain('aria-label="Timer, 1:00"');
+    s.timer.adjustRest(-120);
+    expect(render(s, SessionScreen, { dayId: upper.id, date: "2026-11-20" })).toContain('class="jump-btn timer-btn is-done" aria-label="Timer, 0:00"');
   });
 
   it("gives a rest day the same first two lines, so the arrows stay in place between days", async () => {

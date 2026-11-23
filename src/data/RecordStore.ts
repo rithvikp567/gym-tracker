@@ -32,6 +32,8 @@ export interface RecordStore {
   outbox(): Promise<OutboxEntry[]>;
   /** Removes entries that haven't changed since they were read (a newer edit stays queued). */
   clearOutbox(entries: OutboxEntry[]): Promise<void>;
+  /** Removes every record and queued upload (another account's data), keeping meta. */
+  clear(): Promise<void>;
   getMeta(key: string): Promise<string | undefined>;
   setMeta(key: string, value: string): Promise<void>;
 }

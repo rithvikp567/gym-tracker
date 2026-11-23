@@ -79,6 +79,12 @@ export class IndexedDbRecordStore implements RecordStore {
     await tx.done;
   }
 
+  async clear(): Promise<void> {
+    const tx = this.db.transaction([...TABLES, OUTBOX], "readwrite");
+    await Promise.all([...TABLES, OUTBOX].map((name) => tx.objectStore(name).clear()));
+    await tx.done;
+  }
+
   async getMeta(key: string): Promise<string | undefined> {
     return (await this.db.get(META, key)) as string | undefined;
   }

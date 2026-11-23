@@ -1,4 +1,4 @@
-import { createClient, type Session as AuthSession, type SupabaseClient } from "@supabase/supabase-js";
+import type { Session as AuthSession, SupabaseClient } from "@supabase/supabase-js";
 import { EPOCH, type Syncable } from "../domain/ids";
 import { Emitter, type Unsubscribe } from "../lib/Emitter";
 import type { SyncController, SyncedPreferences, SyncStatus } from "../services/ports";
@@ -15,6 +15,8 @@ interface RemoteRow {
 }
 
 const PAGE = 500;
+/** Which account this device's data belongs to (meta key). */
+const OWNER_KEY = "owner";
 const PUSH_CHUNK = 200;
 /** Re-read a few seconds before the last cursor in case rows committed out of order. */
 const OVERLAP_MS = 5_000;
@@ -39,10 +41,12 @@ const PREFS_FOCUS_MS = 15_000;
  */
 export class SupabaseSync implements SyncController {
   readonly configured = true;
-  private readonly client: SupabaseClient;
   private readonly emitter = new Emitter<SyncStatus>();
   private current: SyncStatus = { state: "signed-out", email: null, lastSyncedAt: null, message: null };
-  private userId: string | null = null;
+  /** The signed-in account, once this device's data is that account's (see `switchAccount`). */
+  private accountId: string | null = null;
+  /** Account switches, one at a time (clearing another account's data takes a moment). */
+  private accountQueue: Promise<void> = Promise.resolve();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running: Promise<void> | null = null;
   private again = false;
@@ -58,15 +62,12 @@ export class SupabaseSync implements SyncController {
   /** Preference syncs run one at a time: a focus check can overlap a full sync. */
   private prefsQueue: Promise<void> = Promise.resolve();
 
+  /** `client` is the app's one Supabase client (connectSupabase), shared with social. */
   constructor(
-    url: string,
-    key: string,
+    private readonly client: SupabaseClient,
     private readonly store: RecordStore,
     private readonly onRemoteChange: () => void,
   ) {
-    this.client = createClient(url, key, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
-    });
     // Don't call Supabase inside this callback (it can deadlock); defer instead.
     this.client.auth.onAuthStateChange((_event, session) => setTimeout(() => this.onAuth(session), 0));
     window.addEventListener("online", () => {
@@ -113,12 +114,33 @@ export class SupabaseSync implements SyncController {
     }
   }
 
+  async requestPasswordReset(email: string): Promise<void> {
+    const { error } = await this.client.auth.resetPasswordForEmail(email.trim());
+    if (error) throw new Error(friendlyAuthError(error.message));
+  }
+
+  /**
+   * The code from the reset email (its template shows `{{ .Token }}`, docs/SOCIAL_SETUP.md), not
+   * a link: a link would open Safari instead of the installed iPhone app (D15). Checking the code
+   * signs in; then the new password is set.
+   */
+  async resetPassword(email: string, code: string, newPassword: string): Promise<void> {
+    const { error } = await this.client.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "recovery" });
+    if (error) throw new Error(friendlyAuthError(error.message));
+    const { error: updateError } = await this.client.auth.updateUser({ password: newPassword });
+    if (updateError) throw new Error(friendlyAuthError(updateError.message));
+  }
+
+  userId(): string | null {
+    return this.accountId;
+  }
+
   async signOut(): Promise<void> {
     await this.client.auth.signOut();
   }
 
   requestSync(delayMs = 1500): void {
-    if (!this.userId) return;
+    if (!this.accountId) return;
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.start(), delayMs);
   }
@@ -134,7 +156,7 @@ export class SupabaseSync implements SyncController {
 
   /** Starts a sync, or joins the one under way and queues another after it. */
   private start(): Promise<void> {
-    if (!this.userId) return Promise.resolve();
+    if (!this.accountId) return Promise.resolve();
     if (this.running) {
       this.again = true;
       return this.running;
@@ -159,16 +181,16 @@ export class SupabaseSync implements SyncController {
     }
     // Signing out (or in as someone else) while this runs makes its outcome moot: the sign-in
     // change already set the status, so this sync leaves it alone.
-    const account = this.userId;
+    const account = this.accountId;
     this.set({ state: "syncing", message: null });
     try {
       await this.push();
       await this.pull();
       // Preferences are a nicety: a failure here never marks the whole sync as failed.
       await this.syncPreferences().catch((e: unknown) => console.warn("Preferences didn't sync", e));
-      if (this.userId === account) this.set({ state: "idle", lastSyncedAt: new Date(), message: null });
+      if (this.accountId === account) this.set({ state: "idle", lastSyncedAt: new Date(), message: null });
     } catch (e) {
-      if (this.userId !== account) return;
+      if (this.accountId !== account) return;
       const offline = !navigator.onLine || e instanceof TypeError;
       this.set({
         state: offline ? "offline" : "error",
@@ -188,7 +210,7 @@ export class SupabaseSync implements SyncController {
         );
         const rows = records.map((r) => ({
           id: r.id,
-          user_id: this.userId,
+          user_id: this.accountId,
           data: r,
           updated_at: r.updatedAt,
           deleted: r.deleted,
@@ -205,7 +227,7 @@ export class SupabaseSync implements SyncController {
   private async pull(): Promise<void> {
     let changed = false;
     for (const table of TABLES) {
-      const cursorKey = `pull:${this.userId}:${table}`;
+      const cursorKey = pullCursorKey(this.accountId!, table);
       const cursor = (await this.store.getMeta(cursorKey)) ?? EPOCH;
       const since = new Date(Math.max(0, Date.parse(cursor) - OVERLAP_MS)).toISOString();
       let latest = cursor;
@@ -213,6 +235,8 @@ export class SupabaseSync implements SyncController {
         const { data, error } = await this.client
           .from(table)
           .select("id,data,updated_at,deleted,server_updated_at")
+          // Own rows only, whatever the database lets this account read.
+          .eq("user_id", this.accountId)
           .gt("server_updated_at", since)
           .order("server_updated_at")
           .order("id")
@@ -235,7 +259,7 @@ export class SupabaseSync implements SyncController {
    * alone, since no records were synced.
    */
   private checkPreferencesOnFocus(): void {
-    if (!this.userId || !navigator.onLine) return;
+    if (!this.accountId || !navigator.onLine) return;
     if (isRecent(this.prefsCheckedAt, PREFS_FOCUS_MS) || isRecent(this.prefsFocusAt, PREFS_FOCUS_MS)) return;
     this.prefsFocusAt = Date.now();
     this.prefsCheckDue = true;
@@ -252,7 +276,7 @@ export class SupabaseSync implements SyncController {
   /** Merges this device's preferences with the account's copy, setting by setting, and stores the result on whichever side lacked it. */
   private async mergePreferences(): Promise<void> {
     const prefs = this.prefs;
-    if (!prefs || !this.userId) return;
+    if (!prefs || !this.accountId) return;
     const version = this.prefsVersion;
     const changedHere = version !== this.prefsSyncedVersion;
     const due = this.prefsCheckDue;
@@ -304,22 +328,51 @@ export class SupabaseSync implements SyncController {
   private onAuth(session: AuthSession | null): void {
     const user = session?.user ?? null;
     const email = user?.email ?? null;
-    if ((user?.id ?? null) === this.userId) {
+    if ((user?.id ?? null) === this.accountId) {
       // Same account: a token refresh, the tab back in front, or a settings upload (USER_UPDATED).
       // The status still describes the last sync, so only a new email is news.
       if (email !== this.current.email) this.set({ email });
       return;
     }
-    this.userId = user?.id ?? null;
-    if (user) this.prefsCheckDue = true;
-    this.set({ state: user ? "idle" : "signed-out", email, message: null });
-    if (user) this.requestSync(0);
+    // Nothing syncs until this device's data is the new account's.
+    this.accountId = null;
+    this.accountQueue = this.accountQueue
+      .then(() => this.switchAccount(user?.id ?? null, email))
+      .catch((e: unknown) => this.set({ state: "error", message: `Couldn't switch accounts: ${(e as Error).message}` }));
+  }
+
+  /**
+   * Makes this device's data the signed-in account's. Data that belongs to another account (a
+   * friend signed in on your phone, then you) is cleared first, so it's never shown to or
+   * uploaded into the wrong account; data from before any sign-in (logged while signed out) is
+   * kept and uploaded. Signing out keeps the data for when the same account signs back in.
+   */
+  private async switchAccount(id: string | null, email: string | null): Promise<void> {
+    if (id) {
+      const owner = await this.store.getMeta(OWNER_KEY);
+      if (owner && owner !== id) {
+        await this.store.clear();
+        // This account may have used the device before; its rows are gone now, so pull them all again.
+        for (const table of TABLES) await this.store.setMeta(pullCursorKey(id, table), EPOCH);
+        this.onRemoteChange();
+      }
+      if (owner !== id) await this.store.setMeta(OWNER_KEY, id);
+    }
+    this.accountId = id;
+    if (id) this.prefsCheckDue = true;
+    this.set({ state: id ? "idle" : "signed-out", email, message: null });
+    if (id) this.requestSync(0);
   }
 
   private set(changes: Partial<SyncStatus>): void {
     this.current = { ...this.current, ...changes };
     this.emitter.emit(this.current);
   }
+}
+
+/** Where the last pull of `table` for `accountId` got to (server time). */
+function pullCursorKey(accountId: string, table: string): string {
+  return `pull:${accountId}:${table}`;
 }
 
 /** Whether `at` (ms) was less than `ms` ago. A time still ahead (the clock was turned back since) has passed. */
@@ -334,5 +387,8 @@ function friendlyAuthError(message: string): string {
   if (/email not confirmed/i.test(message)) return 'This email isn\'t confirmed. Turn off "Confirm email" in Supabase, or confirm it under Authentication → Users.';
   if (/signups? not allowed|sign ?ups? (are )?disabled/i.test(message)) return "New accounts are turned off for this site.";
   if (/already registered/i.test(message)) return "There's already an account with this email. Sign in instead.";
+  if (/token has expired or is invalid|otp.*(expired|invalid)/i.test(message)) return "That code is wrong or has expired. Ask for a new one.";
+  if (/error sending recovery email|error sending.*email/i.test(message)) return "Couldn't send the email: email isn't set up for this site yet.";
+  if (/should be different from the old password/i.test(message)) return "Pick a password you haven't used here before.";
   return message;
 }

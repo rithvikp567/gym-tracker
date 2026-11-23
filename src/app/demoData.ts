@@ -3,8 +3,12 @@ import { platesToPounds, type LoadUnit } from "../domain/Load";
 import { LocalDate, type Weekday } from "../domain/LocalDate";
 import { Session } from "../domain/Session";
 import { SetEntry } from "../domain/SetEntry";
+import { WeekTally } from "../domain/social/WeekTally";
+import { Split } from "../domain/Split";
 import { WorkoutDay } from "../domain/WorkoutDay";
-import type { Clock, Repositories } from "../services/ports";
+import { MemorySocialServer } from "../data/MemorySocial";
+import type { Clock, FriendRecords, Repositories, SocialGateway } from "../services/ports";
+import { SocialService } from "../services/SocialService";
 
 /**
  * Sample data for `?demo` (stored in memory only), so the screens can be previewed and
@@ -132,5 +136,92 @@ function seeded(seed: number): () => number {
   return () => {
     s = (s * 16807) % 2147483647;
     return (s - 1) / 2147483646;
+  };
+}
+
+/** The demo's own account id, and its friends' (see seedDemoSocial). */
+export const DEMO_ME = "demo-me";
+
+/**
+ * Sample friends for `?demo`: two friends with workouts to look at (Alex's carry a note, which
+ * the page never shows), Maya without any logged yet, a request each way, a room you're in and
+ * an invite to another.
+ */
+export function seedDemoSocial(clock: Clock): SocialGateway {
+  const server = new MemorySocialServer();
+  const today = LocalDate.today(clock.now());
+  const thisWeek = today.startOfWeek();
+  const lastWeek = thisWeek.addDays(-7);
+
+  server.addProfile(DEMO_ME, "demo_you", "You");
+  const people = {
+    alex: server.addProfile("demo-alex", "alex_lifts", "Alex"),
+    maya: server.addProfile("demo-maya", "maya_k", "Maya"),
+    chris: server.addProfile("demo-chris", "chris_b", "Chris"),
+    jordan: server.addProfile("demo-jordan", "jdawg", "Jordan"),
+    sam: server.addProfile("demo-sam", "sam_lifts", ""),
+  };
+  server.befriend(DEMO_ME, people.alex.id);
+  server.befriend(people.maya.id, DEMO_ME);
+  server.befriend(people.chris.id, DEMO_ME);
+  server.befriend(people.jordan.id, DEMO_ME, "pending");
+  server.befriend(DEMO_ME, people.sam.id, "pending");
+  server.befriend(people.alex.id, people.chris.id);
+
+  // Friends with workouts score what their workouts say, as the app publishes them (D53).
+  for (const [id, plan, seed] of [
+    [people.alex.id, [["Push", [0, 3]], ["Pull", [1, 4]], ["Legs", [2]]], 11],
+    [people.chris.id, [["Full body", [0, 2, 4]]], 23],
+  ] as const) {
+    const friend = demoFriend(today, plan, seed);
+    server.setRecords(id, friend.records);
+    const { thisWeek: now, lastWeek: before, streak } = SocialService.tallies(friend.sessions, friend.split, today);
+    server.setTally(id, now, streak);
+    server.setTally(id, before, streak);
+  }
+  server.setTally(people.maya.id, WeekTally.of(thisWeek, 3, 1), 0);
+  server.setTally(people.maya.id, WeekTally.of(lastWeek, 3, 2), 0);
+
+  server.seedRoom("Gym bros", DEMO_ME, [
+    { id: people.alex.id, status: "joined" },
+    { id: people.chris.id, status: "joined" },
+    { id: people.maya.id, status: "invited" },
+  ]);
+  server.seedRoom("Leg day club", people.chris.id, [{ id: DEMO_ME, status: "invited" }]);
+
+  return server.as(() => DEMO_ME);
+}
+
+/** A friend's workout days (one exercise list each), split, and four weeks of sessions up to today. */
+function demoFriend(
+  today: LocalDate,
+  plan: readonly (readonly [name: string, weekdays: readonly Weekday[]])[],
+  seed: number,
+): { records: FriendRecords; sessions: Session[]; split: Split } {
+  const random = seeded(seed);
+  let split = Split.empty();
+  const days = plan.map(([name, weekdays], order) => {
+    let day = WorkoutDay.create(name, order);
+    for (const exercise of ["Main lift", "Second lift", "Accessory"]) day = day.addExercise(`${name} ${exercise.toLowerCase()}`);
+    for (const wd of weekdays) split = split.withWeekday(wd, day.id);
+    return day;
+  });
+  const sessions: Session[] = [];
+  for (let date = today.startOfWeek().addDays(-21); !date.isAfter(today); date = date.addDays(1)) {
+    const day = days.find((d) => d.id === split.plannedFor(date));
+    if (!day || random() < 0.15) continue;
+    let session = Session.start(day.id, date);
+    day.activeExercises().forEach((ex, i) => {
+      const weight = Math.round((185 - i * 50 + random() * 10) / 5) * 5;
+      let log = ExerciseLog.empty(ex.id).withSets([new SetEntry(weight, 8), new SetEntry(weight, 7)]).withUnit("lb");
+      if (i === 0) log = log.withNote("Private note: knee felt off");
+      session = session.withLog(log);
+    });
+    sessions.push(session);
+  }
+  return {
+    records: { days: days.map((d) => d.toJSON()), split: split.toJSON(), sessions: sessions.map((s) => s.toJSON()) },
+    sessions,
+    split,
   };
 }

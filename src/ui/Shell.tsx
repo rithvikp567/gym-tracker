@@ -8,12 +8,13 @@ const TABS: { name: TabName; label: string; icon: IconName; to: Route }[] = [
   { name: "home", label: "Home", icon: "home", to: { name: "home" } },
   { name: "calendar", label: "Calendar", icon: "calendar", to: { name: "calendar", year: null } },
   { name: "progress", label: "Progress", icon: "chart", to: { name: "progress", dayId: null } },
+  { name: "social", label: "Social", icon: "users", to: { name: "social" } },
   { name: "settings", label: "Settings", icon: "settings", to: { name: "settings" } },
 ];
 
 /**
  * Phone: the page, with the tab bar floating over the bottom as a rounded tile. Computer: two
- * rounded panels, the rail (Gym Tracker, then the four tabs as square tiles down its length) and
+ * rounded panels, the rail (Gym Tracker, then the five tabs as square tiles down its length) and
  * the main area. Either way the page's content is centered in its space.
  */
 export function Shell({ route, children }: { route: Route; children: ReactNode }) {
@@ -49,7 +50,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
 }
 
 /**
- * The four tabs, with one marker (accent fill and outline) that moves to the current tab, so a
+ * The tabs, with one marker (accent fill and outline) that moves to the current tab, so a
  * tab switch shows where you went. Placed from the tiles' own boxes, so it follows any layout.
  */
 function TabTiles({ active }: { active: TabName }) {

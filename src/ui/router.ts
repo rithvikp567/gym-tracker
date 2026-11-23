@@ -13,6 +13,7 @@ export type Route =
   | { name: "progress"; dayId: string | null }
   /** `dayId` opens that day's card (e.g. "Edit" from Progress). */
   | { name: "setup"; dayId?: string }
+  | { name: "social" }
   | { name: "settings" }
   | { name: "import" };
 
@@ -31,6 +32,8 @@ export function parseHash(hash: string): Route {
       return { name: "progress", dayId: parts[1] ?? null };
     case "setup":
       return parts[1] ? { name: "setup", dayId: parts[1] } : { name: "setup" };
+    case "social":
+      return { name: "social" };
     case "settings":
       return { name: "settings" };
     case "import":

@@ -4,9 +4,13 @@
  * business logic.
  */
 import type { LocalDate } from "../domain/LocalDate";
-import type { Session } from "../domain/Session";
-import type { Split } from "../domain/Split";
-import type { WorkoutDay } from "../domain/WorkoutDay";
+import type { Session, SessionData } from "../domain/Session";
+import type { Split, SplitData } from "../domain/Split";
+import type { Profile } from "../domain/social/Profile";
+import type { FriendRequestOutcome, SocialOverview } from "../domain/social/SocialOverview";
+import type { Username } from "../domain/social/Username";
+import type { WeekTally } from "../domain/social/WeekTally";
+import type { WorkoutDay, WorkoutDayData } from "../domain/WorkoutDay";
 import type { Unsubscribe } from "../lib/Emitter";
 
 export interface WorkoutDayRepository {
@@ -102,6 +106,64 @@ export interface SyncedPreferences {
   onLocalChange(listener: () => void): Unsubscribe;
 }
 
+/** A friend's own records, as the server hands them over: notes are already removed. */
+export interface FriendRecords {
+  days: WorkoutDayData[];
+  split: SplitData | null;
+  /** Sessions on or after the date asked for. */
+  sessions: SessionData[];
+}
+
+/** Why a social call failed, so the screen can say what to do about it. */
+export type SocialProblem =
+  /** No backend for this site (or the demo has none). */
+  | "unavailable"
+  | "signed-out"
+  /** The backend hasn't been given the social tables yet (supabase/migrations/0002_social.sql). */
+  | "not-set-up"
+  | "offline"
+  | "username-taken"
+  | "not-friends"
+  | "failed";
+
+export class SocialError extends Error {
+  constructor(readonly problem: SocialProblem, message?: string) {
+    super(message ?? problem);
+    this.name = "SocialError";
+  }
+}
+
+/**
+ * Friends and rooms on the server, for the signed-in account (TASKS.md D53). Implementations:
+ * `SupabaseSocial` (the app), `MemorySocial` (tests and the ?demo preview), `NoSocial` (no
+ * backend). Failures are `SocialError`s.
+ */
+export interface SocialGateway {
+  /** False when there's no backend at all: the Social page says so instead of trying. */
+  readonly available: boolean;
+  /** Whether a username is free (works signed out, for the sign-up form). */
+  isUsernameFree(username: Username): Promise<boolean>;
+  /** Picks (or changes) the signed-in account's username and display name. */
+  claimProfile(username: Username, displayName: string): Promise<Profile>;
+  /** Requests, friends, room invites and rooms, with scores for `thisWeek` and `lastWeek` (Mondays). */
+  overview(thisWeek: LocalDate, lastWeek: LocalDate): Promise<SocialOverview>;
+  requestFriend(username: Username): Promise<FriendRequestOutcome>;
+  /** Accepts or declines a request from `fromId`. */
+  answerFriend(fromId: string, accept: boolean): Promise<void>;
+  /** Removes a friend, or takes back a request either way. */
+  unfriend(otherId: string): Promise<void>;
+  /** A friend's workout days, split and sessions since `since`, notes removed. */
+  friendRecords(friendId: string, since: LocalDate): Promise<FriendRecords>;
+  /** Creates a room you're in, inviting friends; returns its id. */
+  createRoom(name: string, inviteIds: readonly string[]): Promise<string>;
+  /** Invites more friends to a room you're in. */
+  invite(roomId: string, inviteIds: readonly string[]): Promise<void>;
+  answerInvite(roomId: string, accept: boolean): Promise<void>;
+  leaveRoom(roomId: string): Promise<void>;
+  /** Publishes your own weekly scores (this week and last) and streak, for friends and rooms. */
+  publishTallies(tallies: readonly WeekTally[], streak: number): Promise<void>;
+}
+
 /** Account + sync, as the UI sees it. `NoSync` is used when no backend is configured. */
 export interface SyncController {
   readonly configured: boolean;
@@ -112,6 +174,12 @@ export interface SyncController {
   signIn(email: string, password: string): Promise<void>;
   /** Creates the account and signs in (Supabase's "Confirm email" must be off; no email is sent). */
   createAccount(email: string, password: string): Promise<void>;
+  /** Emails a 6-digit code for setting a new password (needs the backend's mail set up, docs/SOCIAL_SETUP.md). */
+  requestPasswordReset(email: string): Promise<void>;
+  /** Checks the emailed code, sets the new password, and signs in. */
+  resetPassword(email: string, code: string, newPassword: string): Promise<void>;
+  /** The signed-in account's id, or null. */
+  userId(): string | null;
   signOut(): Promise<void>;
   /** A sync the person asked for (the Sync button): also re-reads the account's preferences. */
   syncNow(): Promise<void>;

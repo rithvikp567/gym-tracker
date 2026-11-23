@@ -98,10 +98,12 @@ describe("slides", () => {
 describe("shell", () => {
   const shell = (route: Route) => renderToString(createElement(Shell, { route, children: createElement("p", null, "Screen") }));
 
-  it("draws Gym Tracker and the four tabs, the current one marked", () => {
+  it("draws Gym Tracker and the five tabs, Social before Settings, the current one marked", () => {
     const html = shell({ name: "session", dayId: "u1", date: "2026-11-20" });
     expect(html).toContain("<span>Gym Tracker</span>");
-    expect(html.match(/class="tab"/g)).toHaveLength(4);
+    expect(html.match(/class="tab"/g)).toHaveLength(5);
+    expect([...html.matchAll(/class="tab-label">(\w+)</g)].map((m) => m[1])).toEqual(["Home", "Calendar", "Progress", "Social", "Settings"]);
+    expect(shell({ name: "social" })).toMatch(/href="#\/social" aria-current="page"/);
     expect(html).toMatch(/<a class="tab" href="#\/" aria-current="page">/);
     expect(html).not.toMatch(/href="#\/calendar" aria-current/);
     expect(html).toContain('class="tab-marker"');

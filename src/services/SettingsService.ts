@@ -1,5 +1,6 @@
 import { EPOCH } from "../domain/ids";
 import type { WeightUnit } from "../domain/Load";
+import { MAX_REST_MS, MIN_REST_MS } from "../domain/WorkoutTimer";
 import { Emitter, type Unsubscribe } from "../lib/Emitter";
 import { systemClock, type Clock, type KeyValueStore, type PreferencesSnapshot, type SyncedPreferences } from "./ports";
 
@@ -61,6 +62,8 @@ export interface Settings {
   showLastSession: boolean;
   /** Progress charts every weight in pounds or kilograms, whatever it was logged in (D52). */
   progressUnit: WeightUnit;
+  /** The rest timer's length in seconds, 5 s to an hour (D54). */
+  restSeconds: number;
 }
 
 const DEFAULTS: Settings = {
@@ -72,6 +75,7 @@ const DEFAULTS: Settings = {
   recentAccentColors: [],
   showLastSession: true,
   progressUnit: "lb",
+  restSeconds: 90,
 };
 const SETTING_KEYS = Object.keys(DEFAULTS) as (keyof Settings)[];
 const KEY = "gym-tracker.settings";
@@ -219,6 +223,7 @@ function sanitize(values: Partial<Record<keyof Settings, unknown>>): Settings {
     recentAccentColors: cleanColors(values.recentAccentColors, cleanAccentColor),
     showLastSession: typeof values.showLastSession === "boolean" ? values.showLastSession : DEFAULTS.showLastSession,
     progressUnit: values.progressUnit === "kg" || values.progressUnit === "lb" ? values.progressUnit : DEFAULTS.progressUnit,
+    restSeconds: isRestSeconds(values.restSeconds) ? values.restSeconds : DEFAULTS.restSeconds,
   };
 }
 
@@ -232,7 +237,13 @@ const READABLE: { [K in keyof Settings]: (value: unknown) => boolean } = {
   recentAccentColors: Array.isArray,
   showLastSession: (v) => typeof v === "boolean",
   progressUnit: (v) => v === "lb" || v === "kg",
+  restSeconds: isRestSeconds,
 };
+
+/** A whole number of seconds the rest timer can be set to. */
+function isRestSeconds(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v * 1000 >= MIN_REST_MS && v * 1000 <= MAX_REST_MS;
+}
 
 /**
  * The settings in `values` this version can take over `current`: readable ones, and Custom only
