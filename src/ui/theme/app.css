@@ -1629,11 +1629,96 @@ details > summary {
 
 /* ───────────── Setup & settings ───────────── */
 
-/* Workout Days: collapsible tiles. Head = name + summary; body = name, exercises, add, actions. */
+/* Workout Days: collapsible tiles. Head = name + summary; body = name, exercises, add. */
 .day-cards {
   display: flex;
   flex-direction: column;
   gap: var(--row-tile-gap);
+}
+
+/* A day's slot (useDragList): what lifts and moves while the day is dragged (hold its head, then
+   drag), and the window its card slides in when swiped right, uncovering Delete on its left.
+   `clip`, not `hidden`: no scroll container, so focusing something can't scroll it sideways
+   (`hidden` only where `clip` isn't known, before iOS 16). */
+.day-slot {
+  position: relative;
+  border-radius: var(--tile-radius);
+  overflow: hidden;
+  overflow: clip;
+  transition:
+    scale var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) ease-out;
+}
+
+/* Lifted: a little larger, above the others, outlined in the accent. The others slide aside
+   (transforms set while dragging, --dur / --ease-out). */
+.day-slot.is-dragging {
+  z-index: 2;
+  scale: 1.02;
+  box-shadow: 0 12px 28px var(--knob-shadow);
+}
+
+/* An open card is tall: grown by the same 2% it would reach well past the others. */
+.day-slot.is-dragging:has(> .day-card.open) {
+  scale: none;
+}
+
+.day-slot.is-dragging > .day-card {
+  border-color: var(--accent-solid);
+}
+
+.day-slot.is-dragging .day-card-head {
+  cursor: grabbing;
+}
+
+/* The card covers its Delete until swiped; let go past half way, it stays open (--reveal-w). */
+.day-slot > .day-card {
+  position: relative;
+  transition: transform var(--dur) var(--ease-out);
+}
+
+.day-slot.is-revealed > .day-card {
+  transform: translateX(var(--reveal-w));
+}
+
+/* Delete: a tile of its own left of the card, outlined and labelled in --bad (on the plain tile,
+   where --bad keeps 4.5:1, D45; the tint is only for hover and press). Its label sits level with
+   the card's head, open or closed. Hidden while covered (after the card has slid back). */
+.day-delete {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--reveal-w) - var(--row-tile-gap));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 18px;
+  border: 1px solid color-mix(in srgb, var(--bad) 60%, transparent);
+  border-radius: var(--tile-radius);
+  background: var(--tile);
+  color: var(--bad);
+  font-size: 12px;
+  font-weight: 600;
+  visibility: hidden;
+  transition:
+    visibility 0s linear var(--dur),
+    background-color var(--dur-fast) ease-out;
+}
+
+.day-slot.is-revealed .day-delete,
+.day-slot.is-swiping .day-delete {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+/* More specific than the hover tint below, so a mouse press shows too. */
+.day-slot .day-delete:active {
+  background: color-mix(in srgb, var(--bad) 16%, var(--tile));
+}
+
+/* Inside the slot's clip, so the ring goes inside the tile's edge. */
+.day-delete:focus-visible {
+  outline-offset: -4px;
 }
 
 .day-card {
@@ -1641,6 +1726,8 @@ details > summary {
   overflow: hidden;
 }
 
+/* Also the grip: a vertical swipe still scrolls the page (pan-y), a sideways one swipes; a long
+   press lifts the day instead of selecting text or opening iOS's callout. */
 .day-card-head {
   display: flex;
   align-items: center;
@@ -1649,6 +1736,10 @@ details > summary {
   padding: 16px;
   text-align: left;
   transition: background-color var(--dur-fast) ease-out;
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* More specific than the hover tint below, so a mouse press shows too. */
@@ -1715,13 +1806,86 @@ details > summary {
   color: var(--text-3);
 }
 
-.ex-edit-head span:nth-child(2) {
+/* Active exercises: handle · name · sets × reps · ⋮ · Remove. Tight on a phone: the handle
+   reaches into the card's padding (wider than its column) so the name keeps what room it can. */
+.ex-edit-head.with-grip,
+.ex-edit.with-grip {
+  grid-template-columns: 18px minmax(0, 1fr) auto 30px 30px;
+  column-gap: 4px;
+}
+
+.ex-edit-head span:nth-child(3) {
   text-align: center;
 }
 
 .ex-edit {
   padding: 6px 0;
   border-top: 1px solid var(--tile-line);
+}
+
+.ex-edit.with-grip {
+  transition:
+    scale var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) ease-out;
+}
+
+.ex-edit.with-grip .icon-btn {
+  width: 30px;
+}
+
+.icon-btn.danger {
+  color: var(--bad);
+}
+
+/* Three short lines: hold to lift the row, then drag. A vertical swipe still scrolls the page. */
+.ex-grip {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 38px;
+  margin-left: -10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  cursor: grab;
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Lifted: on a tile of its own, ringed in the accent (shadows, so nothing in the row moves). */
+.ex-edit.is-dragging {
+  position: relative;
+  z-index: 2;
+  scale: 1.02;
+  border-top-color: transparent;
+  border-radius: var(--radius-sm);
+  background: var(--tile);
+  box-shadow:
+    0 0 0 10px var(--tile),
+    0 0 0 11px var(--accent-solid),
+    0 10px 24px var(--knob-shadow);
+}
+
+.ex-edit.is-dragging .ex-grip {
+  cursor: grabbing;
+  color: var(--accent-text);
+}
+
+@media (hover: hover) {
+  .ex-grip:hover {
+    color: var(--text-2);
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+  }
+
+  .ex-edit .icon-btn.danger:hover:not(:disabled) {
+    color: var(--bad);
+    background: color-mix(in srgb, var(--bad) 12%, transparent);
+  }
+
+  .day-delete:hover {
+    background: color-mix(in srgb, var(--bad) 10%, var(--tile));
+  }
 }
 
 .ex-edit-name {
@@ -1834,11 +1998,11 @@ details > summary {
 }
 
 .sets-reps .field {
-  width: 44px;
+  width: 40px;
 }
 
 .sets-reps .field.reps {
-  width: 54px;
+  width: 48px;
 }
 
 .sets-reps .x {
@@ -1907,14 +2071,6 @@ details > summary {
 
 form.add-row {
   margin-top: 12px;
-}
-
-.day-card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 14px;
-  border-top: 1px solid var(--tile-line);
 }
 
 .inline {

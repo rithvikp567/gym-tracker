@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import type { Exercise, ExerciseKind, PastUnits } from "../../domain/Exercise";
 import { unitName, type LoadUnit } from "../../domain/Load";
 import { WEEKDAY_SHORT, type Weekday } from "../../domain/LocalDate";
@@ -7,15 +7,20 @@ import type { WorkoutDay } from "../../domain/WorkoutDay";
 import { usePageHold } from "../components/CenterBlock";
 import { Icon } from "../components/Icon";
 import { BackLink, ScreenHead } from "../components/controls";
+import { useDragList, type GripProps } from "../hooks/useDragList";
 import { useLive, useServices } from "../ServicesContext";
+
+/** How far a day's tile slides right to uncover its Delete: the Delete tile and the gap after it. */
+const DELETE_WIDTH = 84;
 
 /** Field edits saved as they are. The unit goes through SetupService.setUnit, which asks about past sessions. */
 type ExerciseChanges = Partial<{ kind: ExerciseKind; targetSets: number | null; targetReps: string | null; targetText: string | null }>;
 
 /**
  * Workout days, their exercises (free-form, as many as you like), and the weekly split.
- * Days start collapsed so the page reads as a short list; tap one to edit it. `openDayId`
- * (from Progress → Edit) opens that day with its removed exercises showing.
+ * Days start collapsed so the page reads as a short list; tap one to edit it, hold and drag it
+ * to reorder, swipe it right to uncover Delete. `openDayId` (from Progress → Edit) opens that
+ * day with its removed exercises showing.
  */
 export function SetupScreen({ openDayId }: { openDayId?: string | undefined }) {
   const { setup } = useServices();
@@ -33,6 +38,13 @@ export function SetupScreen({ openDayId }: { openDayId?: string | undefined }) {
   // title). The press or key comes before the edit it leads to, so the hold is in place before
   // the card changes size. Only days that still exist count, so deleting the open day lets go.
   usePageHold(touched && Boolean(data?.days.some((d) => openIds.has(d.id))));
+  // Hold and drag a day to reorder; swipe it right for Delete. The page holds still meanwhile.
+  const dayList = useDragList({
+    ids: data?.days.map((d) => d.id) ?? [],
+    onMove: (id, index) => setup.moveDayTo(id, index),
+    revealWidth: DELETE_WIDTH,
+  });
+  usePageHold(dayList.busy);
 
   // Coming from another screen to edit one day: bring its card into view.
   const ready = Boolean(data);
@@ -41,6 +53,7 @@ export function SetupScreen({ openDayId }: { openDayId?: string | undefined }) {
   }, [ready, openDayId]);
 
   if (!data) return <div className="loading">Loading…</div>;
+  const daysById = new Map(data.days.map((d) => [d.id, d]));
 
   const toggle = (id: string) => {
     setTouched(true);
@@ -69,19 +82,53 @@ export function SetupScreen({ openDayId }: { openDayId?: string | undefined }) {
         actions={<BackLink fallback={{ name: "settings" }}>Done</BackLink>}
       />
 
-      <div className="day-cards" onPointerDownCapture={touch} onKeyDownCapture={touch}>
-        {data.days.map((day, i) => (
-          <DayCard
-            key={day.id}
-            day={day}
-            split={data.split}
-            open={openIds.has(day.id)}
-            showRemoved={day.id === openDayId}
-            onToggle={() => toggle(day.id)}
-            first={i === 0}
-            last={i === data.days.length - 1}
-          />
-        ))}
+      <div
+        className="day-cards"
+        ref={dayList.list}
+        style={{ "--reveal-w": `${DELETE_WIDTH}px` } as CSSProperties}
+        onPointerDownCapture={touch}
+        onKeyDownCapture={touch}
+      >
+        {dayList.order.map((id) => {
+          const day = daysById.get(id);
+          if (!day) return null;
+          const { active, revealed } = dayList;
+          const dragging = active?.id === id && active.kind === "drag";
+          const swiping = active?.id === id && active.kind === "swipe";
+          return (
+            // The slot lifts and moves while dragged; the card slides right off its Delete.
+            <div
+              key={id}
+              ref={dayList.item(id)}
+              className={`day-slot${dragging ? " is-dragging" : ""}${swiping ? " is-swiping" : ""}${revealed === id ? " is-revealed" : ""}`}
+            >
+              <button
+                type="button"
+                className="day-delete"
+                {...dayList.action(id)}
+                inert={!swiping && revealed !== id}
+                aria-label={`Delete ${day.name}`}
+                onClick={() => {
+                  // No confirm: the day's logged sessions stay in your history.
+                  dayList.close();
+                  void setup.deleteDay(id);
+                }}
+              >
+                <Icon name="trash" size={20} />
+                <span>Delete</span>
+              </button>
+              <DayCard
+                day={day}
+                split={data.split}
+                open={openIds.has(id)}
+                showRemoved={id === openDayId}
+                onToggle={() => toggle(id)}
+                grip={dayList.grip(id)}
+                slider={dayList.slider(id)}
+              />
+            </div>
+          );
+        })}
       </div>
 
       <form
@@ -131,16 +178,18 @@ function DayCard({
   open,
   showRemoved,
   onToggle,
-  first,
-  last,
+  grip,
+  slider,
 }: {
   day: WorkoutDay;
   split: Split;
   open: boolean;
   showRemoved: boolean;
   onToggle: () => void;
-  first: boolean;
-  last: boolean;
+  /** The head is what you hold to drag the day, swipe to uncover Delete, and tap to open. */
+  grip: GripProps;
+  /** The card is what slides aside when swiped. */
+  slider: (el: HTMLElement | null) => void;
 }) {
   const { setup } = useServices();
   const [adding, setAdding] = useState("");
@@ -157,6 +206,14 @@ function DayCard({
   };
 
   const active = day.activeExercises();
+  const activeById = new Map(active.map((e) => [e.id, e]));
+  // Hold an exercise's handle and drag it to reorder.
+  const exList = useDragList({
+    ids: active.map((e) => e.id),
+    onMove: (id, index) => setup.updateDay(day.id, (d) => d.moveExerciseTo(id, index)),
+    arrowKeys: true,
+  });
+  usePageHold(exList.busy);
   const removed = day.allExercises().filter((e) => e.archived);
   const weekdays = split.weekdaysFor(day.id).map((w) => WEEKDAY_SHORT[w]);
   const bodyId = `day-${day.id}`;
@@ -209,8 +266,16 @@ function DayCard({
   });
 
   return (
-    <section id={`day-card-${day.id}`} className={`card day-card${open ? " open" : ""}`} aria-label={day.name}>
-      <button type="button" className="day-card-head" aria-expanded={open} aria-controls={bodyId} onClick={onToggle}>
+    <section ref={slider} id={`day-card-${day.id}`} className={`card day-card${open ? " open" : ""}`} aria-label={day.name}>
+      <button
+        type="button"
+        className="day-card-head"
+        {...grip}
+        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Delete"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={onToggle}
+      >
         <span className="grow">
           <span className="title">{day.name}</span>
           <span className="meta">
@@ -236,22 +301,28 @@ function DayCard({
           </label>
 
           <div>
-            <div className="ex-edit-head" aria-hidden>
+            <div className="ex-edit-head with-grip" aria-hidden>
+              <span />
               <span>Exercise</span>
               <span>Sets × reps</span>
               <span />
+              <span />
             </div>
-            <div className="ex-edit-list">
-              {active.map((ex, i) => (
-                <ExerciseFields
-                  key={ex.id}
-                  {...rowProps(ex)}
-                  first={i === 0}
-                  last={i === active.length - 1}
-                  onMove={(delta) => edit((d) => d.moveExercise(ex.id, delta))}
-                  onRemove={() => edit((d) => d.archiveExercise(ex.id))}
-                />
-              ))}
+            <div className="ex-edit-list" ref={exList.list}>
+              {exList.order.map((id) => {
+                const ex = activeById.get(id);
+                if (!ex) return null;
+                return (
+                  <ExerciseFields
+                    key={id}
+                    {...rowProps(ex)}
+                    rowRef={exList.item(id)}
+                    grip={exList.grip(id)}
+                    dragging={exList.active?.id === id}
+                    onRemove={() => edit((d) => d.archiveExercise(id))}
+                  />
+                );
+              })}
               {!active.length && <p className="small faint">No exercises yet.</p>}
             </div>
           </div>
@@ -298,22 +369,6 @@ function DayCard({
               )}
             </div>
           )}
-
-          <div className="day-card-actions">
-            <button type="button" className="chip-btn" disabled={first} onClick={() => void setup.moveDay(day.id, -1)}>
-              <Icon name="up" size={15} /> Move up
-            </button>
-            <button type="button" className="chip-btn" disabled={last} onClick={() => void setup.moveDay(day.id, 1)}>
-              <Icon name="dn" size={15} /> Move down
-            </button>
-            <button
-              type="button"
-              className="chip-btn danger"
-              onClick={() => confirm(`Delete ${day.name}? Its logged sessions stay in your history.`) && void setup.deleteDay(day.id)}
-            >
-              <Icon name="trash" size={15} /> Delete day
-            </button>
-          </div>
         </div>
       )}
     </section>
@@ -322,29 +377,32 @@ function DayCard({
 
 /**
  * One exercise on one line: name, sets × reps (or a target for done/not-done), and a ⋮ for
- * the rest. Active rows can move, change type or unit, merge, or be removed; removed rows can
- * be renamed, merged, restored, or deleted with their history.
+ * the rest. Active rows have a handle on the left (hold and drag to reorder) and Remove on the
+ * right (straight away: its history stays, under Removed exercises); their ⋮ changes type or
+ * unit, or merges. Removed rows can be renamed, merged, restored, or deleted with their history.
  */
 function ExerciseFields({
   exercise,
   mergeTargets,
-  first,
-  last,
+  rowRef,
+  grip,
+  dragging = false,
   sessions,
   onRename,
   onChange,
   onMerge,
   countInUnit,
   onSetUnit,
-  onMove,
   onRemove,
   onRestore,
   onDelete,
 }: {
   exercise: Exercise;
   mergeTargets: readonly Exercise[];
-  first?: boolean;
-  last?: boolean;
+  /** Active rows: the row (it moves while dragged) and its handle. */
+  rowRef?: (el: HTMLElement | null) => void;
+  grip?: GripProps;
+  dragging?: boolean;
   /** Removed rows: sessions with something logged, shown instead of the targets. */
   sessions?: number;
   onRename: (name: string) => void;
@@ -353,7 +411,6 @@ function ExerciseFields({
   /** Sessions with weights saved in the exercise's current unit. */
   countInUnit: () => Promise<number>;
   onSetUnit: (unit: LoadUnit, past: PastUnits) => void;
-  onMove?: (delta: -1 | 1) => void;
   onRemove?: () => void;
   onRestore?: () => void;
   onDelete?: () => void;
@@ -388,7 +445,15 @@ function ExerciseFields({
     onSetUnit(nextUnit, past);
   };
   return (
-    <div className={`ex-edit${menuOpen ? " menu-open" : ""}${archived ? " is-archived" : ""}`}>
+    <div
+      ref={rowRef}
+      className={`ex-edit${grip ? " with-grip" : ""}${menuOpen ? " menu-open" : ""}${archived ? " is-archived" : ""}${dragging ? " is-dragging" : ""}`}
+    >
+      {grip && (
+        <button type="button" className="ex-grip" {...grip} aria-label={`Move ${exercise.name}`} aria-keyshortcuts="ArrowUp ArrowDown">
+          <Icon name="grip" size={18} />
+        </button>
+      )}
       <span className="ex-edit-name">
         <input
           className="field quiet"
@@ -446,6 +511,12 @@ function ExerciseFields({
       >
         <Icon name="dots" size={18} />
       </button>
+      {onRemove && (
+        // Straight away, no question: the exercise moves to Removed exercises with its history.
+        <button type="button" className="icon-btn danger" aria-label={`Remove ${exercise.name}`} onClick={onRemove}>
+          <Icon name="x" size={18} />
+        </button>
+      )}
       {menuOpen && unitAsk !== null && (
         // Switching units with sessions saved in the old one: say what those numbers are.
         <div className="ex-edit-menu">
@@ -466,16 +537,6 @@ function ExerciseFields({
       )}
       {menuOpen && unitAsk === null && (
         <div className="ex-edit-menu">
-          {onMove && (
-            <>
-              <button type="button" className="chip-btn" disabled={first} onClick={() => onMove(-1)}>
-                <Icon name="up" size={15} /> Up
-              </button>
-              <button type="button" className="chip-btn" disabled={last} onClick={() => onMove(1)}>
-                <Icon name="dn" size={15} /> Down
-              </button>
-            </>
-          )}
           {onRestore && (
             <button type="button" className="chip-btn" onClick={onRestore}>
               <Icon name="refresh" size={15} /> Bring back
@@ -513,11 +574,6 @@ function ExerciseFields({
                 ))}
               </select>
             </label>
-          )}
-          {onRemove && (
-            <button type="button" className="chip-btn danger" onClick={onRemove}>
-              <Icon name="x" size={15} /> Remove
-            </button>
           )}
           {onDelete && (
             <button type="button" className="chip-btn danger" onClick={onDelete}>

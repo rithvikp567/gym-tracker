@@ -167,12 +167,16 @@ export class WorkoutDay {
     return this.withExercise(into.withNamesOf(from)).retire({ id: fromId, mergedInto: intoId, unit: from.bareUnit });
   }
 
-  /** Moves an active exercise up (-1) or down (+1) among the active ones. */
-  moveExercise(id: string, delta: -1 | 1): WorkoutDay {
+  /**
+   * Moves an active exercise to `index` among the active ones (dragged there), clamped to the
+   * list. The same day comes back when nothing would move.
+   */
+  moveExerciseTo(id: string, index: number): WorkoutDay {
     const active = this.activeExercises();
     const from = active.findIndex((e) => e.id === id);
-    const to = from + delta;
-    if (from < 0 || to < 0 || to >= active.length) return this;
+    if (from < 0 || !Number.isFinite(index)) return this;
+    const to = Math.max(0, Math.min(active.length - 1, Math.trunc(index)));
+    if (to === from) return this;
     const reordered = [...active];
     const [moved] = reordered.splice(from, 1);
     reordered.splice(to, 0, moved!);

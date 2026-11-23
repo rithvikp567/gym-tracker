@@ -39,11 +39,15 @@ export class SetupService {
     if (split.pattern.includes(id)) await this.repos.split.save(split.without(id));
   }
 
-  async moveDay(id: string, delta: -1 | 1): Promise<void> {
+  /**
+   * Moves a day to `index` in the list (dragged there), clamped to the list. Every day is
+   * renumbered 0, 1, 2… in its new place, but only the days whose `order` changed are saved.
+   */
+  async moveDayTo(id: string, index: number): Promise<void> {
     const days = await this.days();
     const from = days.findIndex((d) => d.id === id);
-    const to = from + delta;
-    if (from < 0 || to < 0 || to >= days.length) return;
+    if (from < 0 || !Number.isFinite(index)) return;
+    const to = Math.max(0, Math.min(days.length - 1, Math.trunc(index)));
     const reordered = [...days];
     const [moved] = reordered.splice(from, 1);
     reordered.splice(to, 0, moved!);
