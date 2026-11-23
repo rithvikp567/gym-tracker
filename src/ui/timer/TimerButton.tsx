@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { formatClock, type TimerKind, type TimerStatus } from "../../domain/WorkoutTimer";
 import { REST_PRESETS, REST_STEP } from "../../services/TimerService";
 import { Segmented, Sheet } from "../components/controls";
@@ -22,35 +22,41 @@ const STATUS_LINE: Record<TimerKind, Record<TimerStatus, string>> = {
  * time left first (it's the one you're waiting on), else the stopwatch's.
  */
 export function TimerButton() {
+  const { timer } = useServices();
   const { state, now } = useTimer();
+  const button = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
   const rest = state.rest.status(now);
-  const time =
-    rest === "running" || rest === "done"
-      ? formatClock(state.rest.remaining(now), "up")
-      : state.stopwatch.status(now) === "running"
-        ? formatClock(state.stopwatch.elapsed(now), "down")
-        : null;
+  // The face the clock shows is the one the popup opens on.
+  const counting: TimerKind | null = rest === "running" || rest === "done" ? "rest" : state.stopwatch.status(now) === "running" ? "stopwatch" : null;
+  const time = counting === "rest" ? formatClock(state.rest.remaining(now), "up") : counting ? formatClock(state.stopwatch.elapsed(now), "down") : null;
   return (
     <>
       <button
+        ref={button}
         type="button"
         className={`jump-btn timer-btn${rest === "done" ? " is-done" : ""}`}
         aria-label={time ? `Timer, ${time}` : "Timer"}
         aria-haspopup="dialog"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          if (counting) timer.show(counting);
+          setOpen(true);
+        }}
       >
         <Icon name="clock" size={16} />
         {time && <span className="num">{time}</span>}
       </button>
-      {open && <TimerSheet onClose={close} />}
+      {open && <TimerSheet onClose={close} growFrom={button.current} />}
     </>
   );
 }
 
-/** The popup: rest timer or stopwatch, each with Start / Pause and Reset; both keep running when it closes. */
-export function TimerSheet({ onClose }: { onClose: () => void }) {
+/**
+ * The popup: rest timer or stopwatch, each with Start / Pause and Reset; both keep running when it
+ * closes. It grows out of the clock and shrinks back into it (D55).
+ */
+export function TimerSheet({ onClose, growFrom }: { onClose: () => void; growFrom?: HTMLElement | null }) {
   const { timer } = useServices();
   const { state, now } = useTimer();
   const kind = state.showing;
@@ -65,7 +71,7 @@ export function TimerSheet({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Sheet title="Timer" onClose={onClose}>
+    <Sheet title="Timer" onClose={onClose} growFrom={growFrom}>
       <div className="timer">
         <Segmented label="Timer type" options={KINDS} value={kind} onChange={(k) => timer.show(k)} />
         <div className={`timer-face${isRest ? "" : " no-steps"}`}>

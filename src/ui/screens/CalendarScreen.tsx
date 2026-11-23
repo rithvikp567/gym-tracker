@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import { LocalDate, MONTH_LONG, WEEKDAY_LETTER } from "../../domain/LocalDate";
+import { LocalDate, MONTH_LONG } from "../../domain/LocalDate";
 import type { CalendarDay } from "../../services/CalendarService";
 import { useHoldBriefly } from "../components/CenterBlock";
 import { Icon } from "../components/Icon";
 import { Sheet } from "../components/controls";
+import { datesOfMonth, MonthCells, type DayMark } from "../components/MonthCells";
 import { useViewState } from "../hooks/useViewState";
-import { prefersReducedMotion } from "../motion";
+import { boxOf, canAnimate, easeOut, growKeyframes, prefersReducedMotion } from "../motion";
 import { href, navigate } from "../router";
 import { useLive, useServices } from "../ServicesContext";
 import type { SlideDirection } from "../slide";
 
 /** Every date of a year, grouped by month (Jan = 0). Drawn before the data loads so nothing jumps. */
 function monthsOf(year: number): LocalDate[][] {
-  return Array.from({ length: 12 }, (_, m) => Array.from({ length: LocalDate.daysInMonth(year, m + 1) }, (_, i) => LocalDate.of(year, m + 1, i + 1)));
+  return Array.from({ length: 12 }, (_, m) => datesOfMonth(LocalDate.of(year, m + 1, 1)));
 }
 
 /** The month popped out of the year view (Jan = 0). */
@@ -152,59 +153,6 @@ export function CalendarScreen({ year: routeYear }: { year: number | null }) {
   );
 }
 
-type Status = CalendarDay["status"] | undefined;
-
-/**
- * A month's weekday letters and dates, from the dates alone; the data only adds the dots. In the
- * year view the dates are text (the whole month is the button); `onPick` makes each one a button.
- */
-function MonthCells({
-  dates,
-  today,
-  statusOf,
-  onPick,
-}: {
-  dates: LocalDate[];
-  today: LocalDate;
-  statusOf: (date: LocalDate) => Status;
-  onPick?: (date: LocalDate) => void;
-}) {
-  return (
-    <>
-      {WEEKDAY_LETTER.map((l, i) => (
-        <span className="wd" key={i}>
-          {l}
-        </span>
-      ))}
-      {Array.from({ length: dates[0]!.weekday() }, (_, i) => (
-        <span key={`pad${i}`} />
-      ))}
-      {dates.map((date) => {
-        const status = statusOf(date);
-        const marks = `${date.equals(today) ? " today" : ""}${date.isAfter(today) ? " future" : ""}`;
-        const dot = <span className="dot-slot">{(status === "done" || status === "missed") && <span className={`dot ${status}`} />}</span>;
-        return onPick ? (
-          <button
-            key={date.toString()}
-            type="button"
-            className={`cal-day${marks}`}
-            aria-label={`${date.label()}${status === "done" ? ", worked out" : status === "missed" ? ", missed" : ""}`}
-            onClick={() => onPick(date)}
-          >
-            {date.day}
-            {dot}
-          </button>
-        ) : (
-          <span key={date.toString()} className={`month-day${marks}`}>
-            {date.day}
-            {dot}
-          </span>
-        );
-      })}
-    </>
-  );
-}
-
 /** How long the month takes to grow out of its tile (or fade in). */
 const POP_MS = 220;
 
@@ -232,7 +180,7 @@ function MonthPop({
   title: string;
   dates: LocalDate[];
   today: LocalDate;
-  statusOf: (date: LocalDate) => Status;
+  statusOf: (date: LocalDate) => DayMark;
   covered: boolean;
   /** The month's tile in the year view: focus goes back to it on close. */
   tile: () => HTMLElement | null;
@@ -312,24 +260,12 @@ function keepFocusIn(e: ReactKeyboardEvent<HTMLElement>): void {
  * Animations, so base.css's Reduce Motion switch (CSS only) leaves the fade alone.
  */
 function popIn(scrim: HTMLElement | null, dialog: HTMLElement, from: HTMLElement | null): Animation[] {
-  if (typeof dialog.animate !== "function") return [];
-  const easing = (typeof getComputedStyle === "function" && getComputedStyle(dialog).getPropertyValue("--ease-out").trim()) || "ease-out";
-  const timing = { duration: POP_MS, easing };
+  if (!canAnimate(dialog)) return [];
+  const timing = { duration: POP_MS, easing: easeOut(dialog) };
   const fade: Keyframe[] = [{ opacity: 0 }, { opacity: 1 }];
-  const a = from?.isConnected ? from.getBoundingClientRect() : null;
-  const b = dialog.getBoundingClientRect();
-  const grow: Keyframe[] | null =
-    a && a.width > 0 && b.width > 0 && !prefersReducedMotion()
-      ? [
-          {
-            transformOrigin: "0 0",
-            transform: `translate(${a.left - b.left}px, ${a.top - b.top}px) scale(${a.width / b.width}, ${a.height / b.height})`,
-            opacity: 0,
-          },
-          { opacity: 1, offset: 0.4 },
-          { transformOrigin: "0 0", transform: "none", opacity: 1 },
-        ]
-      : null;
+  const a = boxOf(from);
+  const b = boxOf(dialog);
+  const grow = a && b && !prefersReducedMotion() ? growKeyframes(a, b) : null;
   return [scrim?.animate(fade, timing), dialog.animate(grow ?? fade, timing)].filter((x): x is Animation => !!x);
 }
 

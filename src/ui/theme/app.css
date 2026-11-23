@@ -708,7 +708,7 @@ button.list-row:active {
   justify-content: center;
   padding: var(--tile-gap) calc(var(--tile-gap) + env(safe-area-inset-right)) max(var(--tile-gap), env(safe-area-inset-bottom))
     calc(var(--tile-gap) + env(safe-area-inset-left));
-  animation: fade var(--dur-fast) ease-out;
+  /* Opening and closing motion is Sheet's (controls.tsx): grows from the button that opened it. */
 }
 
 .sheet {
@@ -721,25 +721,11 @@ button.list-row:active {
   border: 1px solid var(--accent-line);
   border-radius: var(--panel-radius);
   padding: 18px var(--gutter);
-  animation: rise var(--dur) var(--ease-out);
 }
 
 @media (min-width: 900px) {
   .sheet-backdrop {
     align-items: center;
-  }
-}
-
-@keyframes fade {
-  from {
-    opacity: 0;
-  }
-}
-
-@keyframes rise {
-  from {
-    transform: translateY(24px);
-    opacity: 0;
   }
 }
 
@@ -1065,13 +1051,6 @@ a.square:active {
   transform: scale(0.97);
 }
 
-.date-picker input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  width: 100%;
-  cursor: pointer;
-}
 
 .session-jumps {
   display: flex;
@@ -1824,6 +1803,45 @@ a.square:active {
     min-height: 60px;
     font-size: 18px;
   }
+}
+
+/* The date picker (D55): the Calendar's month in a sheet that grows out of the date pill, the
+   day you're on filled with the accent (after .today and .future, so it wins over both). */
+.date-sheet-head {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.date-sheet-title {
+  text-align: center;
+  font-size: 18px;
+}
+
+.date-sheet .month-grid {
+  row-gap: 4px;
+}
+
+.date-sheet .month-grid .wd {
+  font-size: 12px;
+  padding-bottom: 4px;
+}
+
+.cal-day.selected {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.cal-day.selected .dot {
+  background: var(--accent-ink);
+}
+
+.date-sheet-foot {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
 }
 
 /* A month tile with a mouse over it, like a list row (.cal-day's is with the others, at the end). */
@@ -2973,7 +2991,7 @@ form.add-row {
     background: color-mix(in srgb, var(--text) 6%, transparent);
   }
 
-  .cal-day:hover {
+  .cal-day:hover:not(.selected) {
     background: color-mix(in srgb, var(--text) 8%, transparent);
   }
 

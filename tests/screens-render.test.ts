@@ -397,6 +397,9 @@ describe("Workout and rest-day headers", () => {
     const html = render(s, SessionScreen, { dayId: upper.id, date: "2026-11-20" });
     expect(html).toMatch(/class="session-top"><a class="icon-btn"[^>]*aria-label="Back"[\s\S]*<h1 class="session-name">Upper 1<\/h1><\/div>/);
     expect(html).toMatch(/aria-label="Previous day"[\s\S]*Fri, Nov 20 \| Week 47[\s\S]*aria-label="Next day"[\s\S]*class="session-jumps"/);
+    // The date opens the app's own picker (D55), not the phone's date input.
+    expect(html).toContain('<button type="button" class="date-picker num" aria-haspopup="dialog"');
+    expect(html).not.toContain('type="date"');
     // The timer's clock sits right after Next session (D54); nothing counting, so just the icon.
     expect(html).toMatch(/Next session<svg[\s\S]*?<\/button><button type="button" class="jump-btn timer-btn" aria-label="Timer" aria-haspopup="dialog"><svg/);
   });
