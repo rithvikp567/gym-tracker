@@ -13,7 +13,8 @@ import { ProgressService } from "../src/services/ProgressService";
 import { SessionService } from "../src/services/SessionService";
 import { SettingsService } from "../src/services/SettingsService";
 import { SetupService } from "../src/services/SetupService";
-import { SettingsScreen } from "../src/ui/screens/settings/SettingsScreen";
+import { setViewState } from "../src/ui/hooks/useViewState";
+import { APPEARANCE_OPEN, SettingsScreen } from "../src/ui/screens/settings/SettingsScreen";
 import { ServicesProvider } from "../src/ui/ServicesContext";
 
 /* Settings rendered once on the server (no effects), with sync set up and signed in. */
@@ -47,8 +48,30 @@ describe("Settings screen", () => {
     // The install card asks what kind of device this is: a computer, so it stays hidden.
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("pointer: fine") }));
     vi.stubGlobal("navigator", { userAgent: "node", platform: "Linux", maxTouchPoints: 0 });
+    // Appearance is a drop-down; most tests here look inside it.
+    setViewState(APPEARANCE_OPEN, true);
   });
   afterEach(() => vi.unstubAllGlobals());
+
+  it("lists Account and sync, then Workouts, then Appearance", () => {
+    const titles = [...render(makeServices()).matchAll(/<div class="section-title">([^<]+)<\/div>/g)].map((m) => m[1]);
+    expect(titles).toEqual(["Account and sync", "Workouts", "Appearance"]);
+  });
+
+  it("folds Appearance under a drop-down, closed at first, that names the theme and accent", () => {
+    setViewState(APPEARANCE_OPEN, false);
+    const services = makeServices();
+    services.settings.update({ theme: "sand", accent: "teal" });
+    const html = render(services);
+    expect(html).toMatch(/<section class="card day-card" aria-label="Appearance"><button type="button" class="day-card-head" aria-expanded="false"/);
+    expect(html).toContain("Sand theme · Teal accent");
+    expect(html).not.toContain('role="radio"'); // no swatches or theme tiles until it's opened
+    setViewState(APPEARANCE_OPEN, true);
+    const open = render(services);
+    expect(open).toMatch(/class="card day-card open" aria-label="Appearance"><button type="button" class="day-card-head" aria-expanded="true"/);
+    expect(open).toMatch(/<div class="day-card-body" id="appearance-body"><div class="look">/); // no card inside the card
+    expect([...open.matchAll(/role="radio"/g)]).toHaveLength(16);
+  });
 
   it("shows the accent swatches and theme tiles, with the current ones picked and named", () => {
     const html = render(makeServices());
@@ -83,7 +106,7 @@ describe("Settings screen", () => {
 
   it("lists the Workouts rows by title alone", () => {
     const html = render(makeServices());
-    const workouts = html.slice(html.indexOf(">Workouts<"), html.indexOf(">Account and sync<"));
+    const workouts = html.slice(html.indexOf(">Workouts<"), html.indexOf(">Appearance<"));
     for (const title of ["Workout Days and Split", "Import from Google Sheets", "Download a backup"]) expect(workouts).toContain(title);
     expect(workouts).not.toContain('class="meta"');
   });
