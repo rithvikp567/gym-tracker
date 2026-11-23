@@ -1481,15 +1481,16 @@ a.square:active {
   gap: 6px;
 }
 
-/* Each month on its own tile: 2 across on a phone, 3 when there's room, 4 on a wide screen. */
+/* Each month on its own tile: 2 across on a phone, 3 when there's room, 4 on a wide screen. The
+   whole tile is one button that pops the month out (below); the days on it are only text. */
 .months {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--tile-gap);
 }
 
-/* (Viewport widths. A container query would work too now: the day sheet is drawn into <body>,
-   so a query container here wouldn't become the box its fixed backdrop is placed in.) */
+/* (Viewport widths. A container query would work too now: the day sheet and the popped-out month
+   are drawn into <body>, so a query container here wouldn't become the box they're placed in.) */
 @media (min-width: 600px) {
   .months {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1502,15 +1503,30 @@ a.square:active {
   }
 }
 
+/* A column from the top: a button centers its content, which put five-week months lower than
+   their six-week neighbours on the same row. */
 .month {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  width: 100%;
   padding: 12px 8px 8px;
+  text-align: center;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out,
+    border-color var(--dur-fast) ease-out;
 }
 
-.month h3 {
+.month:active {
+  transform: scale(0.97);
+}
+
+.month-name {
+  display: block;
   font-size: 14px;
   font-weight: 600;
   margin-bottom: 6px;
-  text-align: center;
 }
 
 .month-grid {
@@ -1526,16 +1542,102 @@ a.square:active {
   padding-bottom: 2px;
 }
 
+/* A date, with a slot for its dot under it: text on a year's tile (.month-day), a button in the
+   popped-out month (.cal-day). */
+.month-day,
 .cal-day {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 3px 0;
-  border-radius: 8px;
-  font-size: 12px;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
+}
+
+.month-day {
+  gap: 2px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+:is(.month-day, .cal-day) .dot-slot {
+  height: 5px;
+  display: grid;
+  place-items: center;
+}
+
+:is(.month-day, .cal-day) .dot {
+  width: 5px;
+  height: 5px;
+}
+
+:is(.month-day, .cal-day).today {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+:is(.month-day, .cal-day).future {
+  color: var(--text-3);
+}
+
+/* The popped-out month: over the page and the tab bar, under a date's sheet (.sheet-backdrop is
+   z-index 50), centered by `margin: auto`. The month scrolls itself when it's taller than the
+   window (a phone on its side), not this layer: while it grows out of its tile, its transformed
+   box would make a scrolling layer show a scrollbar and shift it sideways by half of one. */
+.month-pop-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  padding: max(var(--tile-gap), env(safe-area-inset-top)) calc(var(--tile-gap) + env(safe-area-inset-right))
+    max(var(--tile-gap), env(safe-area-inset-bottom)) calc(var(--tile-gap) + env(safe-area-inset-left));
+}
+
+/* The dim around it, the same as behind a sheet. An element of its own with nothing in it: a
+   click lands on it only when the press started and ended on it, never after a press that
+   started on the month. */
+.month-pop-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.month-pop {
+  position: relative;
+  width: min(100%, 440px);
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: auto;
+  padding: 16px 12px 12px;
+  border-radius: var(--panel-radius);
+}
+
+/* Focus is put on the dialog itself when it opens (for screen readers); a ring around the whole
+   month would say nothing. Its dates show theirs. */
+.month-pop:focus {
+  outline: none;
+}
+
+.month-pop-title {
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.month-pop .month-grid {
+  row-gap: 4px;
+}
+
+.month-pop .month-grid .wd {
+  font-size: 12px;
+  padding-bottom: 4px;
+}
+
+.cal-day {
+  justify-content: center;
+  gap: 4px;
+  min-height: 48px;
+  border-radius: 12px;
+  font-size: 17px;
   transition:
     transform var(--dur-fast) var(--ease-out),
     background-color var(--dur-fast) ease-out;
@@ -1546,23 +1648,32 @@ a.square:active {
 }
 
 .cal-day .dot-slot {
-  height: 5px;
-  display: grid;
-  place-items: center;
+  height: 7px;
 }
 
 .cal-day .dot {
-  width: 5px;
-  height: 5px;
+  width: 7px;
+  height: 7px;
 }
 
-.cal-day.today {
-  color: var(--accent-text);
-  font-weight: 600;
+@media (min-width: 600px) {
+  .month-pop {
+    width: min(100%, 520px);
+    padding: 20px 16px 16px;
+  }
+
+  .cal-day {
+    min-height: 60px;
+    font-size: 18px;
+  }
 }
 
-.cal-day.future {
-  color: var(--text-3);
+/* A month tile with a mouse over it, like a list row (.cal-day's is with the others, at the end). */
+@media (hover: hover) {
+  .month:hover {
+    background: color-mix(in srgb, var(--text) 5%, var(--tile));
+    border-color: color-mix(in srgb, var(--accent-solid) 60%, var(--tile-line));
+  }
 }
 
 /* ───────────── Progress ───────────── */

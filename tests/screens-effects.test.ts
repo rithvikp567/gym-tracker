@@ -7,7 +7,7 @@ import { NoSync } from "../src/data/NoSync";
 import { StoreRepositories } from "../src/data/StoreRepositories";
 import { Exercise } from "../src/domain/Exercise";
 import { ExerciseLog } from "../src/domain/ExerciseLog";
-import { LocalDate } from "../src/domain/LocalDate";
+import { LocalDate, MONTH_LONG } from "../src/domain/LocalDate";
 import { SetEntry } from "../src/domain/SetEntry";
 import { BackupService } from "../src/services/BackupService";
 import { CalendarService, type DayTarget } from "../src/services/CalendarService";
@@ -24,6 +24,7 @@ import { useLookVersion } from "../src/ui/hooks/useLookVersion";
 import { useSwipe } from "../src/ui/hooks/useSwipe";
 import { setViewState } from "../src/ui/hooks/useViewState";
 import { navigate } from "../src/ui/router";
+import { CalendarScreen } from "../src/ui/screens/CalendarScreen";
 import { HomeScreen } from "../src/ui/screens/HomeScreen";
 import { SetupScreen } from "../src/ui/screens/SetupScreen";
 import { ExerciseEditor } from "../src/ui/screens/session/ExerciseEditor";
@@ -157,6 +158,10 @@ class FakeElement extends FakeNode {
 
   scrollIntoView(): void {}
 
+  focus(): void {
+    this.ownerDocument!.activeElement = this;
+  }
+
   /** A <select>'s choices (React picks the selected one through this). */
   get options(): FakeElement[] {
     return findAll(this, (el) => el.localName === "option");
@@ -175,7 +180,7 @@ class FakeElement extends FakeNode {
 class FakeDocument extends FakeNode {
   readonly documentElement: FakeElement;
   readonly body: FakeElement;
-  readonly activeElement = null;
+  activeElement: FakeElement | null = null;
   defaultView: unknown = null;
 
   constructor() {
@@ -205,7 +210,20 @@ class FakeDocument extends FakeNode {
 }
 
 const doc = new FakeDocument();
-const win = { document: doc, event: undefined, HTMLIFrameElement: class {}, addEventListener() {}, removeEventListener() {} };
+/** Listeners on `window` (Escape for sheets and the popped-out month). */
+const winListeners: { type: string; listener: Listener; capture: boolean }[] = [];
+const win = {
+  document: doc,
+  event: undefined,
+  HTMLIFrameElement: class {},
+  addEventListener(type: string, listener: Listener, options?: ListenerOptions) {
+    winListeners.push({ type, listener, capture: isCapture(options) });
+  },
+  removeEventListener(type: string, listener: Listener, options?: ListenerOptions) {
+    const i = winListeners.findIndex((l) => l.type === type && l.listener === listener && l.capture === isCapture(options));
+    if (i >= 0) winListeners.splice(i, 1);
+  },
+};
 doc.defaultView = win;
 
 let mounted: { root: Root; container: FakeElement } | null = null;
@@ -233,6 +251,37 @@ function unmount(): void {
 /** Waits `ms`, then lets the loads in flight land (the in-memory store answers at once) and renders what they bring. */
 async function settle(ms = 0): Promise<void> {
   await act(() => new Promise((resolve) => setTimeout(resolve, ms)));
+}
+
+/**
+ * A key pressed, as `window` hears it: capture listeners, then the rest, in the order they were
+ * added. Each runs in its own act, since a browser lets React render between two listeners; as
+ * in a browser, one removed meanwhile is skipped and one added meanwhile isn't called.
+ */
+function pressKey(key: string): void {
+  const listeners = winListeners.filter((l) => l.type === "keydown").sort((a, b) => Number(b.capture) - Number(a.capture));
+  for (const l of listeners) {
+    if (winListeners.includes(l)) act(() => l.listener({ type: "keydown", key }));
+  }
+}
+
+/**
+ * A tap the way a browser sends it, through React's own listeners (on the root and on <body> for
+ * what's drawn there): pointerdown where the press starts, then a click on `clickOn` — where it
+ * was let go, or the nearest parent of both when that's somewhere else.
+ */
+function tap(start: FakeElement, clickOn: FakeElement = start): void {
+  act(() => dispatch(start, "pointerdown"));
+  act(() => dispatch(clickOn, "click"));
+}
+
+/** Fires `type` at `target`: capture listeners from the top down, then bubble ones back up. */
+function dispatch(target: FakeElement, type: string): void {
+  const path: FakeElement[] = [];
+  for (let n: FakeNode | null = target; n; n = n.parentNode) if (n instanceof FakeElement) path.push(n);
+  const event = { type, target, button: 0 };
+  for (const el of [...path].reverse()) for (const l of el.listeners) if (l.type === type && l.capture) l.listener(event);
+  for (const el of path) for (const l of el.listeners) if (l.type === type && !l.capture) l.listener(event);
 }
 
 /** A finger dragged `dx` px sideways across `el`. Synchronous: nothing in flight lands meanwhile. */
@@ -268,6 +317,8 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.clearAllMocks();
   setViewState(HOME_PICK_KEY, null);
+  winListeners.length = 0;
+  doc.activeElement = null;
 });
 
 afterEach(() => {
@@ -628,6 +679,135 @@ describe("Sheet, mounted", () => {
     expect(onClose).not.toHaveBeenCalled();
     press(backdrop, backdrop);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Calendar, mounted", () => {
+  beforeEach(() => {
+    // What the screen remembers until the app closes (useViewState): the year and the open month.
+    setViewState("calendar.year", null);
+    setViewState("calendar.month", null);
+  });
+
+  /** Upper 1, planned on Mondays, logged on Mon Nov 16, 2026 (today is Fri Nov 20). */
+  async function withUpper(): Promise<{ s: AppServices; upperId: string }> {
+    const s = makeServices();
+    let upper = await s.setup.createDay("Upper 1");
+    upper = (await s.setup.updateDay(upper.id, (x) => x.addExercise("Pulldown")))!;
+    await s.setup.setPlanned(0, upper.id);
+    await s.sessions.saveLog(upper.id, d("2026-11-16"), ExerciseLog.empty(upper.activeExercises()[0]!.id).withSets([new SetEntry(100, 8)]));
+    return { s, upperId: upper.id };
+  }
+
+  const screen = (s: AppServices, year: number | null) => createElement(ServicesProvider, { services: s, children: createElement(CalendarScreen, { year }) });
+
+  /** The calendar at `year` (null: the Calendar tab, #/calendar), loaded. */
+  async function openCalendar(s: AppServices, year: number | null = 2026): Promise<FakeElement> {
+    const host = mount(screen(s, year));
+    await settle();
+    return host;
+  }
+
+  const labelled = (node: FakeNode, label: string) => findAll(node, (el) => el.getAttribute("aria-label") === label)[0];
+  const tile = (host: FakeElement, name: string) => labelled(host, name) ?? fail(`No tile for ${name}`);
+  /** The popped-out month (its dialog), drawn into <body>. */
+  const month = () => byClass(doc.body, "month-pop")[0] ?? null;
+  const sheet = () => byClass(doc.body, "sheet")[0] ?? null;
+  /** A date's button in the popped-out month, by its label's start ("Wed, Nov 18"). */
+  const date = (label: string) =>
+    findAll(month() ?? fail("No month open"), (el) => el.tagName === "BUTTON" && (el.getAttribute("aria-label") ?? "").startsWith(label))[0] ??
+    fail(`No button for ${label}`);
+  const fail = (message: string): never => {
+    throw new Error(message);
+  };
+
+  it("makes each month one button with its days as plain text, and pops a month out bigger with its dates to tap", async () => {
+    const { s } = await withUpper();
+    const host = await openCalendar(s);
+    // The year view: twelve buttons, one per month; no day is a button.
+    const buttons = findAll(host, (el) => el.tagName === "BUTTON");
+    expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(MONTH_LONG.map((m) => `${m} 2026`));
+    expect(byClass(host, "month-day")).toHaveLength(365);
+    expect(month()).toBeNull();
+
+    tap(tile(host, "November 2026"));
+    const dialog = month()!;
+    expect(dialog.getAttribute("role")).toBe("dialog");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(doc.getElementById(dialog.getAttribute("aria-labelledby")!)?.textContent).toBe("November 2026");
+    // Over the page, not in it (the page moves while it animates), and focus moved into it.
+    expect(dialog.parentNode?.parentNode).toBe(doc.body);
+    expect(doc.activeElement).toBe(dialog);
+    expect(findAll(dialog, (el) => el.tagName === "BUTTON")).toHaveLength(30);
+    expect(date("Mon, Nov 16").getAttribute("aria-label")).toBe("Mon, Nov 16, worked out");
+    expect(date("Fri, Nov 20").getAttribute("class")).toBe("cal-day today");
+  });
+
+  it("opens a date's one session from the popped-out month, or its sheet on top of the month", async () => {
+    const { s, upperId } = await withUpper();
+    const host = await openCalendar(s);
+    tap(tile(host, "November 2026"));
+    tap(date("Mon, Nov 16"));
+    expect(navigate).toHaveBeenCalledWith({ name: "session", dayId: upperId, date: "2026-11-16" });
+
+    tap(date("Wed, Nov 18"));
+    expect(sheet()?.textContent).toContain("Wed, Nov 18");
+    expect(month()).not.toBeNull();
+    // Drawn after the month in <body> (and on a higher layer in CSS), so it's on top.
+    const layers = doc.body.childNodes.map((n) => (n as FakeElement).getAttribute?.("class"));
+    expect(layers.indexOf("sheet-backdrop")).toBeGreaterThan(layers.indexOf("month-pop-layer"));
+  });
+
+  it("closes one layer per tap outside: the date's sheet, then the month, and gives focus back to the month's tile", async () => {
+    const { s } = await withUpper();
+    const host = await openCalendar(s);
+    tap(tile(host, "November 2026"));
+    tap(date("Wed, Nov 18"));
+
+    tap(one(doc.body, "sheet-backdrop"));
+    expect(sheet()).toBeNull();
+    expect(month()).not.toBeNull();
+
+    // A press that starts on the month and is let go outside clicks the layer they share: still open.
+    tap(date("Thu, Nov 19"), one(doc.body, "month-pop-layer"));
+    expect(month()).not.toBeNull();
+
+    tap(one(doc.body, "month-pop-scrim"));
+    expect(month()).toBeNull();
+    expect(doc.activeElement).toBe(tile(host, "November 2026"));
+  });
+
+  it("closes one layer per Escape: the date's sheet, then the month", async () => {
+    const { s } = await withUpper();
+    const host = await openCalendar(s);
+    tap(tile(host, "November 2026"));
+    tap(date("Wed, Nov 18"));
+
+    pressKey("Escape");
+    expect(sheet()).toBeNull();
+    expect(month()).not.toBeNull();
+
+    pressKey("Escape");
+    expect(month()).toBeNull();
+    expect(doc.activeElement).toBe(tile(host, "November 2026"));
+  });
+
+  it("brings the month back on Back from a session it opened, and closes it for another year", async () => {
+    const { s } = await withUpper();
+    const host = await openCalendar(s, null); // the Calendar tab
+    tap(tile(host, "November 2026"));
+    tap(date("Mon, Nov 16"));
+    expect(navigate).toHaveBeenCalledTimes(1);
+    unmount(); // the session screen replaces the calendar
+    expect(month()).toBeNull();
+
+    await openCalendar(s, null); // Back
+    expect(month()?.textContent).toContain("November 2026");
+
+    rerender(screen(s, 2025));
+    expect(month()).toBeNull();
+    rerender(screen(s, 2026)); // and coming back to 2026 doesn't open it again
+    expect(month()).toBeNull();
   });
 });
 

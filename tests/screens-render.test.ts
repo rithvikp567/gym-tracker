@@ -18,6 +18,7 @@ import { SetupService } from "../src/services/SetupService";
 import type { SyncController, SyncState } from "../src/services/ports";
 import { HOME_PICK_KEY, homePick, homeWeek, weekRangeLabel } from "../src/ui/homePick";
 import { setViewState } from "../src/ui/hooks/useViewState";
+import { CalendarScreen } from "../src/ui/screens/CalendarScreen";
 import { DayScreen } from "../src/ui/screens/DayScreen";
 import { HomeScreen } from "../src/ui/screens/HomeScreen";
 import { SessionScreen } from "../src/ui/screens/session/SessionScreen";
@@ -367,6 +368,19 @@ describe("Workout and rest-day headers", () => {
     expect(html).toContain(`href="#/session/${upper.id}/2026-11-15"`);
     expect(html).toMatch(/class="list" aria-busy="true"/);
     expect(html).not.toContain("Rest day");
+  });
+});
+
+describe("Calendar", () => {
+  it("draws the year before it loads: twelve month tiles to tap, their days as text, none of them a button", async () => {
+    const s = makeServices();
+    await upperAndLower(s);
+    const html = render(s, CalendarScreen, { year: 2026 });
+    expect(count(html, "<button")).toBe(12);
+    expect(html).toContain('<button type="button" class="tile month" aria-label="November 2026" aria-haspopup="dialog">');
+    expect(count(html, '<span class="month-day')).toBe(365);
+    expect(html).toContain('<span class="month-day today">20<span class="dot-slot"></span></span>');
+    expect(html).not.toContain("cal-day");
   });
 });
 
