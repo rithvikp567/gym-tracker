@@ -1132,4 +1132,20 @@ describe("ExerciseEditor units, mounted", () => {
     await settle(450);
     expect([lastSaved(onSave).unit, lastSaved(onSave).topWeight()]).toEqual(["lb", 380]);
   });
+
+  it("has no remove-set button: clearing a set's numbers leaves it out of what's saved", async () => {
+    const bench = Exercise.create("Bench press");
+    const onSave = vi.fn();
+    const log = ExerciseLog.empty(bench.id).withSets([new SetEntry(185, 6), new SetEntry(185, 6), new SetEntry(185, 5)]);
+    const host = mount(createElement(ExerciseEditor, { exercise: bench, log, last: undefined, onSave }));
+    expect(findAll(host, (el) => el.getAttribute("aria-label")?.startsWith("Remove") ?? false)).toEqual([]);
+    expect(findAll(host, (el) => el.tagName === "TEXTAREA")[0]!.getAttribute("placeholder")).toBe("Note for today");
+    type(field(host, "Set 3 weight"), "");
+    type(field(host, "Set 3 reps"), "");
+    await settle(450);
+    expect(lastSaved(onSave).filledSets().map((s) => [s.weight, s.reps])).toEqual([
+      [185, 6],
+      [185, 6],
+    ]);
+  });
 });

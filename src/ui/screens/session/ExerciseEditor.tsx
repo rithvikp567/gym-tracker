@@ -90,8 +90,6 @@ export function ExerciseEditor({
     update({ ...draft, sets: [...draft.sets, { weight: prev?.weight ?? "", reps: "" }] });
   };
 
-  const removeSet = (i: number) => update({ ...draft, sets: draft.sets.filter((_, j) => j !== i) });
-
   // Pounds → plates isn't guessed: the reps are copied and the weights left for you to fill in.
   const copyLast = () => {
     if (!last) return;
@@ -101,7 +99,7 @@ export function ExerciseEditor({
   const noteField = (
     <textarea
       className="field"
-      placeholder="Note for today (hidden until tapped)"
+      placeholder="Note for today"
       value={draft.note}
       onChange={(e) => update({ ...draft, note: e.target.value })}
       rows={2}
@@ -149,9 +147,6 @@ export function ExerciseEditor({
             value={s.reps}
             onChange={(e) => setReps(i, e.target.value)}
           />
-          <button type="button" className="icon-btn" aria-label={`Remove set ${i + 1}`} onClick={() => removeSet(i)}>
-            <Icon name="x" size={16} />
-          </button>
         </div>
       ))}
       {plates && <PlatesHint value={parse(draft.sets.find((x) => x.weight.trim())?.weight ?? "")} />}
