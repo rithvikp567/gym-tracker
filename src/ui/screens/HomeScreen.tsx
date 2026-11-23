@@ -2,12 +2,12 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { LocalDate, WEEKDAY_LETTER } from "../../domain/LocalDate";
 import type { CalendarDay } from "../../services/CalendarService";
 import { Icon } from "../components/Icon";
-import { WorkoutRows } from "../components/WorkoutRows";
 import { useViewState } from "../hooks/useViewState";
 import { useSwipe } from "../hooks/useSwipe";
 import { HOME_PICK_KEY, homePick, homeWeek, weekRangeLabel, type HomePick } from "../homePick";
 import { play } from "../motion";
 import { href } from "../router";
+import { HomeWorkouts } from "./HomeWorkouts";
 import { prefetchLive, useLive, useLiveState, useServices, useSyncStatus } from "../ServicesContext";
 
 /** "Upper 1" → "U1", "Abs/Cardio" → "AC", "Lower" → "Lower". */
@@ -64,7 +64,7 @@ export function HomeScreen() {
   const dayName = (id: string | null) => workoutDays.find((d) => d.id === id)?.name ?? "";
   // The header and strip come from the dates alone (D26), so nothing waits for the week to load.
   const dates = Array.from({ length: 7 }, (_, i) => weekStart.addDays(i));
-  // The rows keep the week last on screen (even one that came from the cache) until this one
+  // The workouts keep the week last on screen (even one that came from the cache) until this one
   // lands. A week step keeps the weekday, so the plan still matches; the checks catch up when
   // the week arrives.
   const rowsDay = (thisWeek ?? week.previous)?.find((d) => d.date.weekday() === picked.weekday());
@@ -115,12 +115,14 @@ export function HomeScreen() {
           Edit days
         </a>
       </div>
-      <WorkoutRows
+      <HomeWorkouts
         days={workoutDays}
         date={picked}
+        today={today}
         plannedDayId={rowsDay?.plannedDayId ?? null}
         sessions={rowsDay?.sessions ?? []}
         lastDone={lastDone}
+        known={rowsDay !== undefined}
         busy={!thisWeek || !lastDone}
       />
 
@@ -192,7 +194,7 @@ function WeekStrip({
 }
 
 /**
- * Sync status (or "Demo data") under the rows. When sync is set up, its slot is kept even while
+ * Sync status (or "Demo data") under the workouts. When sync is set up, its slot is kept even while
  * there's nothing to say yet (sign-in finishes after Home draws, sometimes after a token refresh),
  * so the chip appearing never makes the page taller and moves the centered strip.
  */

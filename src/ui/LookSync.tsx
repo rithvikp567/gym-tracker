@@ -6,7 +6,7 @@ import { LOOK_KEY, LOOK_TOKENS, resolveLook, type Look, type LookSettings } from
 
 /*
  * A look shown for a moment without saving it: the color picker while you drag. It lives on
- * this device only (nothing is stamped or synced) until Done saves it; Cancel clears it, and
+ * this device only (nothing is stamped or synced) until Use color saves it; Cancel clears it, and
  * the saved look comes back.
  */
 let preview: Partial<LookSettings> | null = null;

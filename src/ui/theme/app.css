@@ -701,7 +701,7 @@ button.list-row:active {
   position: fixed;
   inset: 0;
   z-index: 50;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--scrim);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -848,6 +848,109 @@ button.list-row:active {
   color: var(--text-2);
 }
 
+/* Home: the picked day's workout as one big tile with its Start button (what was logged that
+   day, else what's planned), the other workouts as squares with just their names (D47). */
+.tile.hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 80px;
+  padding: 14px 14px 14px 20px;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out,
+    border-color var(--dur-fast) ease-out;
+}
+
+.hero-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.hero .name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.hero .meta {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.hero-go {
+  flex: none;
+  min-width: 76px;
+}
+
+.tile.hero.rest {
+  justify-content: center;
+  text-align: center;
+  padding-inline: 20px;
+}
+
+.hero.rest .name {
+  justify-content: center;
+}
+
+.hero.is-placeholder .hero-text {
+  visibility: hidden;
+}
+
+/* As many squares per row as gridColumns() says (--n on a phone, --n-wide from 600px); each is
+   at most --sq-max wide, and a short row is centered. */
+.square-grid {
+  --cols: var(--n);
+  --sq-gap: var(--row-tile-gap);
+  --sq-max: 124px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sq-gap);
+}
+
+@media (min-width: 600px) {
+  .square-grid {
+    --cols: var(--n-wide);
+    --sq-max: 168px;
+  }
+}
+
+.tile.square {
+  position: relative;
+  flex: 0 0 calc((100% - (var(--cols) - 1) * var(--sq-gap)) / var(--cols));
+  max-width: var(--sq-max);
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out,
+    border-color var(--dur-fast) ease-out;
+}
+
+/* A check in the corner, so the name stays in the middle. */
+.square .check-mark {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+}
+
+a.hero:active,
+a.square:active {
+  transform: scale(0.985);
+}
+
 .tag-planned {
   font-size: 12px;
   color: var(--accent-text);
@@ -869,10 +972,10 @@ button.list-row:active {
   visibility: hidden;
 }
 
-/* Rows still showing the last week on screen while the picked one loads: aria-busy at once,
-   data-stale (set by WorkoutRows after 150 ms) dims them, so fast loads never flicker. Not an
+/* Workouts still showing the last week on screen while the picked one loads: aria-busy at once,
+   data-stale (set after 150 ms) dims them, so fast loads never flicker. Not an
    animation: Reduce Motion turns those off, and only the fade should go then, not the dimming. */
-.home .list[data-stale] {
+.home-workouts[data-stale] {
   opacity: 0.45;
   transition: opacity 0.2s ease-out;
 }
@@ -1378,15 +1481,16 @@ button.list-row:active {
   gap: 6px;
 }
 
-/* Each month on its own tile: 2 across on a phone, 3 when there's room, 4 on a wide screen. */
+/* Each month on its own tile: 2 across on a phone, 3 when there's room, 4 on a wide screen. The
+   whole tile is one button that pops the month out (below); the days on it are only text. */
 .months {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--tile-gap);
 }
 
-/* (Viewport widths. A container query would work too now: the day sheet is drawn into <body>,
-   so a query container here wouldn't become the box its fixed backdrop is placed in.) */
+/* (Viewport widths. A container query would work too now: the day sheet and the popped-out month
+   are drawn into <body>, so a query container here wouldn't become the box they're placed in.) */
 @media (min-width: 600px) {
   .months {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1399,15 +1503,30 @@ button.list-row:active {
   }
 }
 
+/* A column from the top: a button centers its content, which put five-week months lower than
+   their six-week neighbours on the same row. */
 .month {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  width: 100%;
   padding: 12px 8px 8px;
+  text-align: center;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease-out,
+    border-color var(--dur-fast) ease-out;
 }
 
-.month h3 {
+.month:active {
+  transform: scale(0.97);
+}
+
+.month-name {
+  display: block;
   font-size: 14px;
   font-weight: 600;
   margin-bottom: 6px;
-  text-align: center;
 }
 
 .month-grid {
@@ -1423,16 +1542,102 @@ button.list-row:active {
   padding-bottom: 2px;
 }
 
+/* A date, with a slot for its dot under it: text on a year's tile (.month-day), a button in the
+   popped-out month (.cal-day). */
+.month-day,
 .cal-day {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 3px 0;
-  border-radius: 8px;
-  font-size: 12px;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
+}
+
+.month-day {
+  gap: 2px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+:is(.month-day, .cal-day) .dot-slot {
+  height: 5px;
+  display: grid;
+  place-items: center;
+}
+
+:is(.month-day, .cal-day) .dot {
+  width: 5px;
+  height: 5px;
+}
+
+:is(.month-day, .cal-day).today {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+:is(.month-day, .cal-day).future {
+  color: var(--text-3);
+}
+
+/* The popped-out month: over the page and the tab bar, under a date's sheet (.sheet-backdrop is
+   z-index 50), centered by `margin: auto`. The month scrolls itself when it's taller than the
+   window (a phone on its side), not this layer: while it grows out of its tile, its transformed
+   box would make a scrolling layer show a scrollbar and shift it sideways by half of one. */
+.month-pop-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  padding: max(var(--tile-gap), env(safe-area-inset-top)) calc(var(--tile-gap) + env(safe-area-inset-right))
+    max(var(--tile-gap), env(safe-area-inset-bottom)) calc(var(--tile-gap) + env(safe-area-inset-left));
+}
+
+/* The dim around it, the same as behind a sheet. An element of its own with nothing in it: a
+   click lands on it only when the press started and ended on it, never after a press that
+   started on the month. */
+.month-pop-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+}
+
+.month-pop {
+  position: relative;
+  width: min(100%, 440px);
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: auto;
+  padding: 16px 12px 12px;
+  border-radius: var(--panel-radius);
+}
+
+/* Focus is put on the dialog itself when it opens (for screen readers); a ring around the whole
+   month would say nothing. Its dates show theirs. */
+.month-pop:focus {
+  outline: none;
+}
+
+.month-pop-title {
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.month-pop .month-grid {
+  row-gap: 4px;
+}
+
+.month-pop .month-grid .wd {
+  font-size: 12px;
+  padding-bottom: 4px;
+}
+
+.cal-day {
+  justify-content: center;
+  gap: 4px;
+  min-height: 48px;
+  border-radius: 12px;
+  font-size: 17px;
   transition:
     transform var(--dur-fast) var(--ease-out),
     background-color var(--dur-fast) ease-out;
@@ -1443,23 +1648,32 @@ button.list-row:active {
 }
 
 .cal-day .dot-slot {
-  height: 5px;
-  display: grid;
-  place-items: center;
+  height: 7px;
 }
 
 .cal-day .dot {
-  width: 5px;
-  height: 5px;
+  width: 7px;
+  height: 7px;
 }
 
-.cal-day.today {
-  color: var(--accent-text);
-  font-weight: 600;
+@media (min-width: 600px) {
+  .month-pop {
+    width: min(100%, 520px);
+    padding: 20px 16px 16px;
+  }
+
+  .cal-day {
+    min-height: 60px;
+    font-size: 18px;
+  }
 }
 
-.cal-day.future {
-  color: var(--text-3);
+/* A month tile with a mouse over it, like a list row (.cal-day's is with the others, at the end). */
+@media (hover: hover) {
+  .month:hover {
+    background: color-mix(in srgb, var(--text) 5%, var(--tile));
+    border-color: color-mix(in srgb, var(--accent-solid) 60%, var(--tile-line));
+  }
 }
 
 /* ───────────── Progress ───────────── */
@@ -1629,11 +1843,96 @@ details > summary {
 
 /* ───────────── Setup & settings ───────────── */
 
-/* Workout Days: collapsible tiles. Head = name + summary; body = name, exercises, add, actions. */
+/* Workout Days: collapsible tiles. Head = name + summary; body = name, exercises, add. */
 .day-cards {
   display: flex;
   flex-direction: column;
   gap: var(--row-tile-gap);
+}
+
+/* A day's slot (useDragList): what lifts and moves while the day is dragged (hold its head, then
+   drag), and the window its card slides in when swiped right, uncovering Delete on its left.
+   `clip`, not `hidden`: no scroll container, so focusing something can't scroll it sideways
+   (`hidden` only where `clip` isn't known, before iOS 16). */
+.day-slot {
+  position: relative;
+  border-radius: var(--tile-radius);
+  overflow: hidden;
+  overflow: clip;
+  transition:
+    scale var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) ease-out;
+}
+
+/* Lifted: a little larger, above the others, outlined in the accent. The others slide aside
+   (transforms set while dragging, --dur / --ease-out). */
+.day-slot.is-dragging {
+  z-index: 2;
+  scale: 1.02;
+  box-shadow: 0 12px 28px var(--knob-shadow);
+}
+
+/* An open card is tall: grown by the same 2% it would reach well past the others. */
+.day-slot.is-dragging:has(> .day-card.open) {
+  scale: none;
+}
+
+.day-slot.is-dragging > .day-card {
+  border-color: var(--accent-solid);
+}
+
+.day-slot.is-dragging .day-card-head {
+  cursor: grabbing;
+}
+
+/* The card covers its Delete until swiped; let go past half way, it stays open (--reveal-w). */
+.day-slot > .day-card {
+  position: relative;
+  transition: transform var(--dur) var(--ease-out);
+}
+
+.day-slot.is-revealed > .day-card {
+  transform: translateX(var(--reveal-w));
+}
+
+/* Delete: a tile of its own left of the card, outlined and labelled in --bad (on the plain tile,
+   where --bad keeps 4.5:1, D45; the tint is only for hover and press). Its label sits level with
+   the card's head, open or closed. Hidden while covered (after the card has slid back). */
+.day-delete {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--reveal-w) - var(--row-tile-gap));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 18px;
+  border: 1px solid color-mix(in srgb, var(--bad) 60%, transparent);
+  border-radius: var(--tile-radius);
+  background: var(--tile);
+  color: var(--bad);
+  font-size: 12px;
+  font-weight: 600;
+  visibility: hidden;
+  transition:
+    visibility 0s linear var(--dur),
+    background-color var(--dur-fast) ease-out;
+}
+
+.day-slot.is-revealed .day-delete,
+.day-slot.is-swiping .day-delete {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+/* More specific than the hover tint below, so a mouse press shows too. */
+.day-slot .day-delete:active {
+  background: color-mix(in srgb, var(--bad) 16%, var(--tile));
+}
+
+/* Inside the slot's clip, so the ring goes inside the tile's edge. */
+.day-delete:focus-visible {
+  outline-offset: -4px;
 }
 
 .day-card {
@@ -1641,6 +1940,8 @@ details > summary {
   overflow: hidden;
 }
 
+/* Also the grip: a vertical swipe still scrolls the page (pan-y), a sideways one swipes; a long
+   press lifts the day instead of selecting text or opening iOS's callout. */
 .day-card-head {
   display: flex;
   align-items: center;
@@ -1649,6 +1950,10 @@ details > summary {
   padding: 16px;
   text-align: left;
   transition: background-color var(--dur-fast) ease-out;
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* More specific than the hover tint below, so a mouse press shows too. */
@@ -1715,13 +2020,86 @@ details > summary {
   color: var(--text-3);
 }
 
-.ex-edit-head span:nth-child(2) {
+/* Active exercises: handle · name · sets × reps · ⋮ · Remove. Tight on a phone: the handle
+   reaches into the card's padding (wider than its column) so the name keeps what room it can. */
+.ex-edit-head.with-grip,
+.ex-edit.with-grip {
+  grid-template-columns: 18px minmax(0, 1fr) auto 30px 30px;
+  column-gap: 4px;
+}
+
+.ex-edit-head span:nth-child(3) {
   text-align: center;
 }
 
 .ex-edit {
   padding: 6px 0;
   border-top: 1px solid var(--tile-line);
+}
+
+.ex-edit.with-grip {
+  transition:
+    scale var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) ease-out;
+}
+
+.ex-edit.with-grip .icon-btn {
+  width: 30px;
+}
+
+.icon-btn.danger {
+  color: var(--bad);
+}
+
+/* Three short lines: hold to lift the row, then drag. A vertical swipe still scrolls the page. */
+.ex-grip {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 38px;
+  margin-left: -10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  cursor: grab;
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Lifted: on a tile of its own, ringed in the accent (shadows, so nothing in the row moves). */
+.ex-edit.is-dragging {
+  position: relative;
+  z-index: 2;
+  scale: 1.02;
+  border-top-color: transparent;
+  border-radius: var(--radius-sm);
+  background: var(--tile);
+  box-shadow:
+    0 0 0 10px var(--tile),
+    0 0 0 11px var(--accent-solid),
+    0 10px 24px var(--knob-shadow);
+}
+
+.ex-edit.is-dragging .ex-grip {
+  cursor: grabbing;
+  color: var(--accent-text);
+}
+
+@media (hover: hover) {
+  .ex-grip:hover {
+    color: var(--text-2);
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+  }
+
+  .ex-edit .icon-btn.danger:hover:not(:disabled) {
+    color: var(--bad);
+    background: color-mix(in srgb, var(--bad) 12%, transparent);
+  }
+
+  .day-delete:hover {
+    background: color-mix(in srgb, var(--bad) 10%, var(--tile));
+  }
 }
 
 .ex-edit-name {
@@ -1834,11 +2212,11 @@ details > summary {
 }
 
 .sets-reps .field {
-  width: 44px;
+  width: 40px;
 }
 
 .sets-reps .field.reps {
-  width: 54px;
+  width: 48px;
 }
 
 .sets-reps .x {
@@ -1848,6 +2226,42 @@ details > summary {
 
 .ex-edit .target-text {
   width: 106px;
+}
+
+/* Phones: every pixel to the name, so names like "Incline chest press" fit on a 375 px screen
+   (they need about 136 px): a narrower ⋮ (its glyph is a thin line) and ×, a narrower sets box,
+   tighter gaps, and the list reaching into the card's right padding. */
+@media (max-width: 430px) {
+  .ex-edit-head.with-grip,
+  .ex-edit.with-grip {
+    grid-template-columns: 16px minmax(0, 1fr) auto 24px 28px;
+    column-gap: 3px;
+  }
+
+  .ex-grip {
+    margin-left: -12px;
+  }
+
+  .ex-edit-head.with-grip,
+  .ex-edit-list {
+    margin-right: -6px;
+  }
+
+  .ex-edit.with-grip .icon-btn {
+    width: 28px;
+  }
+
+  .ex-edit.with-grip .icon-btn:not(.danger) {
+    width: 24px;
+  }
+
+  .ex-edit.with-grip .sets-reps {
+    gap: 2px;
+  }
+
+  .ex-edit.with-grip .sets-reps .field:not(.reps) {
+    width: 36px;
+  }
 }
 
 .ex-edit-menu {
@@ -1907,14 +2321,6 @@ details > summary {
 
 form.add-row {
   margin-top: 12px;
-}
-
-.day-card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 14px;
-  border-top: 1px solid var(--tile-line);
 }
 
 .inline {
@@ -2070,7 +2476,9 @@ form.add-row {
   }
 
   a.list-row:hover,
-  button.list-row:hover {
+  button.list-row:hover,
+  a.hero:hover,
+  a.square:hover {
     background: color-mix(in srgb, var(--text) 5%, var(--tile));
     border-color: color-mix(in srgb, var(--accent-solid) 60%, var(--tile-line));
   }

@@ -7,9 +7,11 @@ type Paint = CSSProperties & Record<`--${string}`, string | number>;
 
 /**
  * Pick any color: a wheel (hue around, saturation outward), brightness and opacity sliders,
- * a hex field, and the last few colors picked here. Every change is shown at once through
- * `onPreview` (this device only); Done hands back the color to save, and Cancel, Escape or a
- * tap outside put back what was there. One picker serves the theme and the accent.
+ * a hex field, and the last few colors picked here. While a finger or the mouse is down on the
+ * wheel or a slider, only the picker follows it; letting go applies the color to the page through
+ * `onPreview` (this device only), and so does a key press, a typed hex or a recent color. "Use
+ * color" hands back the color to save; Cancel, Escape or a tap outside put back what was there.
+ * One picker serves the theme and the accent.
  */
 export function ColorPicker({
   title,
@@ -40,10 +42,36 @@ export function ColorPicker({
   const touched = useRef(false);
   const wheel = useRef<HTMLDivElement>(null);
 
-  // Show every change at once; the first render is what's already showing.
+  // The page shows a change when you let go (the user's ask: "once they let go on a color apply
+  // it immediately"); while you hold, only the wheel, sliders and swatches follow. The first
+  // render is what's already showing.
+  const [held, setHeld] = useState(false);
   useEffect(() => {
-    if (touched.current) onPreview(color);
-  }, [color, onPreview]);
+    if (touched.current && !held) onPreview(color);
+  }, [color, held, onPreview]);
+  // Let go anywhere (the pointer can leave the wheel or slider while held) ends the hold.
+  const release = useRef<(() => void) | null>(null);
+  const hold = useCallback(() => {
+    if (release.current) return;
+    setHeld(true);
+    const end = () => {
+      window.removeEventListener("pointerup", end, true);
+      window.removeEventListener("pointercancel", end, true);
+      release.current = null;
+      setHeld(false);
+    };
+    release.current = end;
+    window.addEventListener("pointerup", end, true);
+    window.addEventListener("pointercancel", end, true);
+  }, []);
+  useEffect(
+    () => () => {
+      if (!release.current) return;
+      window.removeEventListener("pointerup", release.current, true);
+      window.removeEventListener("pointercancel", release.current, true);
+    },
+    [],
+  );
 
   const change = (next: Partial<Hsva>) => {
     touched.current = true;
@@ -74,7 +102,7 @@ export function ColorPicker({
     >
       <Sheet title={title} onClose={cancel}>
         <div className="cp">
-          <Wheel ref={wheel} hsva={hsva} opaque={opaque} onChange={change} />
+          <Wheel ref={wheel} hsva={hsva} opaque={opaque} onHold={hold} onChange={change} />
 
           <div className="cp-sliders">
             <label className="cp-row">
@@ -86,6 +114,7 @@ export function ColorPicker({
                   min={0}
                   max={100}
                   value={Math.round(hsva.v * 100)}
+                  onPointerDown={hold}
                   onChange={(e) => change({ v: Number(e.target.value) / 100 })}
                   style={{ "--thumb": opaque } as Paint}
                 />
@@ -103,6 +132,7 @@ export function ColorPicker({
                   min={Math.round(minAlpha * 100)}
                   max={100}
                   value={Math.round(hsva.a * 100)}
+                  onPointerDown={hold}
                   onChange={(e) => change({ a: Number(e.target.value) / 100 })}
                   style={{ "--thumb": shows(color) } as Paint}
                 />
@@ -144,7 +174,7 @@ export function ColorPicker({
               Cancel
             </button>
             <button type="button" className="btn primary" onClick={() => onDone(color)}>
-              Done
+              Use color
             </button>
           </div>
         </div>
@@ -169,11 +199,14 @@ function Wheel({
   ref,
   hsva,
   opaque,
+  onHold,
   onChange,
 }: {
   ref: Ref<HTMLDivElement>;
   hsva: Hsva;
   opaque: string;
+  /** A press began: the page waits for the let-go. */
+  onHold: () => void;
   onChange: (next: Partial<Hsva>) => void;
 }) {
   // Pointer moves land faster than frames: keep the latest and apply it once per frame.
@@ -196,6 +229,7 @@ function Wheel({
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     e.currentTarget.focus({ preventScroll: true });
+    onHold();
     // Black has no hue to see: touching the wheel brings up enough brightness to show one.
     if (hsva.v < 0.04) onChange({ v: 0.3 });
     pickAt(e.clientX, e.clientY, e.currentTarget);

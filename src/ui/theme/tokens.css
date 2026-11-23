@@ -275,6 +275,8 @@
   /* A switch's knob: white in every theme, with a shadow so it shows on a light track. */
   --knob: #ffffff;
   --knob-shadow: rgba(0, 0, 0, 0.28);
+  /* The dim behind a sheet or the popped-out calendar month. */
+  --scrim: rgba(0, 0, 0, 0.6);
 
   --radius: 12px;
   --radius-sm: 8px;

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRecordStore } from "../src/data/MemoryRecordStore";
 import { TABLES, type TableName } from "../src/data/RecordStore";
 import { settle } from "../src/data/recordSync";
@@ -128,6 +128,40 @@ describe("CalendarService day arrows", () => {
     await sessions.saveLog(day.id, d("2026-11-18"), ExerciseLog.empty(pull.id).withSets(sets(100, 5)));
     expect(await calendar.dayTarget(d("2026-11-18"), null)).toEqual({ kind: "workout", dayId: day.id });
     expect(await calendar.dayTarget(d("2026-11-19"), day.id)).toEqual({ kind: "pick" });
+  });
+});
+
+describe("SetupService day order", () => {
+  it("moves a day to a place in the list (a drag), saving only the days whose place changed", async () => {
+    const [a, b, c, d] = [await setup.createDay("A"), await setup.createDay("B"), await setup.createDay("C"), await setup.createDay("D")];
+    const names = async () => (await setup.days()).map((x) => `${x.name}:${x.order}`);
+    const saveMany = vi.spyOn(repos.days, "saveMany");
+    const saved = () => saveMany.mock.calls.flatMap(([days]) => days.map((x) => x.name));
+
+    await setup.moveDayTo(d.id, 1);
+    expect(await names()).toEqual(["A:0", "D:1", "B:2", "C:3"]);
+    expect(saved()).toEqual(["D", "B", "C"]); // A kept its place
+
+    saveMany.mockClear();
+    await setup.moveDayTo(b.id, 0);
+    expect(await names()).toEqual(["B:0", "A:1", "D:2", "C:3"]);
+    expect(saved()).toEqual(["B", "A", "D"]);
+
+    // Past either end: first or last.
+    saveMany.mockClear();
+    await setup.moveDayTo(a.id, 99);
+    expect(await names()).toEqual(["B:0", "D:1", "C:2", "A:3"]);
+    expect(saved()).toEqual(["D", "C", "A"]);
+    await setup.moveDayTo(c.id, -3);
+    expect(await names()).toEqual(["C:0", "B:1", "D:2", "A:3"]);
+
+    // Nothing to move: nothing saved.
+    saveMany.mockClear();
+    await setup.moveDayTo(c.id, 0);
+    await setup.moveDayTo("nope", 2);
+    await setup.moveDayTo(b.id, Number.NaN);
+    expect(saved()).toEqual([]);
+    expect(await names()).toEqual(["C:0", "B:1", "D:2", "A:3"]);
   });
 });
 

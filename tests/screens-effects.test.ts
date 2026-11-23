@@ -7,7 +7,7 @@ import { NoSync } from "../src/data/NoSync";
 import { StoreRepositories } from "../src/data/StoreRepositories";
 import { Exercise } from "../src/domain/Exercise";
 import { ExerciseLog } from "../src/domain/ExerciseLog";
-import { LocalDate } from "../src/domain/LocalDate";
+import { LocalDate, MONTH_LONG } from "../src/domain/LocalDate";
 import { SetEntry } from "../src/domain/SetEntry";
 import { BackupService } from "../src/services/BackupService";
 import { CalendarService, type DayTarget } from "../src/services/CalendarService";
@@ -20,10 +20,12 @@ import { CenterPage, useHoldBriefly, usePageHold } from "../src/ui/components/Ce
 import { Sheet } from "../src/ui/components/controls";
 import { HOME_PICK_KEY, homePick, rememberHomeDay } from "../src/ui/homePick";
 import { useDayStep } from "../src/ui/hooks/useDayStep";
+import { HOLD_MS } from "../src/ui/hooks/useDragList";
 import { useLookVersion } from "../src/ui/hooks/useLookVersion";
 import { useSwipe } from "../src/ui/hooks/useSwipe";
 import { setViewState } from "../src/ui/hooks/useViewState";
 import { navigate } from "../src/ui/router";
+import { CalendarScreen } from "../src/ui/screens/CalendarScreen";
 import { HomeScreen } from "../src/ui/screens/HomeScreen";
 import { SetupScreen } from "../src/ui/screens/SetupScreen";
 import { ExerciseEditor } from "../src/ui/screens/session/ExerciseEditor";
@@ -157,6 +159,10 @@ class FakeElement extends FakeNode {
 
   scrollIntoView(): void {}
 
+  focus(): void {
+    this.ownerDocument!.activeElement = this;
+  }
+
   /** A <select>'s choices (React picks the selected one through this). */
   get options(): FakeElement[] {
     return findAll(this, (el) => el.localName === "option");
@@ -175,7 +181,7 @@ class FakeElement extends FakeNode {
 class FakeDocument extends FakeNode {
   readonly documentElement: FakeElement;
   readonly body: FakeElement;
-  readonly activeElement = null;
+  activeElement: FakeElement | null = null;
   defaultView: unknown = null;
 
   constructor() {
@@ -205,8 +211,25 @@ class FakeDocument extends FakeNode {
 }
 
 const doc = new FakeDocument();
-const win = { document: doc, event: undefined, HTMLIFrameElement: class {}, addEventListener() {}, removeEventListener() {} };
+/** Listeners on `window`: Escape for sheets and the popped-out month, a drag following the pointer (`fireWindow`). */
+const winListeners: { type: string; listener: Listener; capture: boolean }[] = [];
+const win = {
+  document: doc,
+  event: undefined,
+  HTMLIFrameElement: class {},
+  addEventListener(type: string, listener: Listener, options?: ListenerOptions) {
+    winListeners.push({ type, listener, capture: isCapture(options) });
+  },
+  removeEventListener(type: string, listener: Listener, options?: ListenerOptions) {
+    const i = winListeners.findIndex((l) => l.type === type && l.listener === listener && l.capture === isCapture(options));
+    if (i >= 0) winListeners.splice(i, 1);
+  },
+};
 doc.defaultView = win;
+
+function fireWindow(type: string, event: Record<string, unknown>): void {
+  for (const l of winListeners.filter((x) => x.type === type)) l.listener({ type, ...event });
+}
 
 let mounted: { root: Root; container: FakeElement } | null = null;
 
@@ -233,6 +256,37 @@ function unmount(): void {
 /** Waits `ms`, then lets the loads in flight land (the in-memory store answers at once) and renders what they bring. */
 async function settle(ms = 0): Promise<void> {
   await act(() => new Promise((resolve) => setTimeout(resolve, ms)));
+}
+
+/**
+ * A key pressed, as `window` hears it: capture listeners, then the rest, in the order they were
+ * added. Each runs in its own act, since a browser lets React render between two listeners; as
+ * in a browser, one removed meanwhile is skipped and one added meanwhile isn't called.
+ */
+function pressKey(key: string): void {
+  const listeners = winListeners.filter((l) => l.type === "keydown").sort((a, b) => Number(b.capture) - Number(a.capture));
+  for (const l of listeners) {
+    if (winListeners.includes(l)) act(() => l.listener({ type: "keydown", key }));
+  }
+}
+
+/**
+ * A tap the way a browser sends it, through React's own listeners (on the root and on <body> for
+ * what's drawn there): pointerdown where the press starts, then a click on `clickOn` — where it
+ * was let go, or the nearest parent of both when that's somewhere else.
+ */
+function tap(start: FakeElement, clickOn: FakeElement = start): void {
+  act(() => dispatch(start, "pointerdown"));
+  act(() => dispatch(clickOn, "click"));
+}
+
+/** Fires `type` at `target`: capture listeners from the top down, then bubble ones back up. */
+function dispatch(target: FakeElement, type: string): void {
+  const path: FakeElement[] = [];
+  for (let n: FakeNode | null = target; n; n = n.parentNode) if (n instanceof FakeElement) path.push(n);
+  const event = { type, target, button: 0 };
+  for (const el of [...path].reverse()) for (const l of el.listeners) if (l.type === type && l.capture) l.listener(event);
+  for (const el of path) for (const l of el.listeners) if (l.type === type && !l.capture) l.listener(event);
 }
 
 /** A finger dragged `dx` px sideways across `el`. Synchronous: nothing in flight lands meanwhile. */
@@ -268,6 +322,8 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.clearAllMocks();
   setViewState(HOME_PICK_KEY, null);
+  winListeners.length = 0;
+  doc.activeElement = null;
 });
 
 afterEach(() => {
@@ -338,11 +394,11 @@ describe("Home, mounted", () => {
   const title = (home: FakeElement) => findAll(home, (el) => el.localName === "h1")[0]?.textContent;
   const plans = (home: FakeElement) => byClass(home, "plan").map((el) => el.textContent);
   const busy = (el: FakeElement) => el.getAttribute("aria-busy") === "true";
-  /** The rows with a check: the workouts logged on the picked date. */
+  /** The workout tiles (the big one, then the squares) with a check: those logged on the picked date. */
   const logged = (home: FakeElement) =>
-    byClass(home, "day-row")
-      .filter((row) => byClass(row, "check-mark").length > 0)
-      .map((row) => one(row, "title").firstChild?.textContent);
+    byClass(home, "workout-tile")
+      .filter((tile) => byClass(tile, "check-mark").length > 0)
+      .map((tile) => one(tile, "name").firstChild?.textContent);
 
   it("loads the weeks either side of the one on screen, so each step draws at once", async () => {
     const s = makeServices();
@@ -359,7 +415,7 @@ describe("Home, mounted", () => {
     expect(busy(one(home, "week-strip"))).toBe(false);
     expect(plans(home)).toEqual(["U1", "", "", "", "", "", ""]);
     expect(logged(home)).toEqual(["Lower"]);
-    expect(busy(one(home, "list"))).toBe(false);
+    expect(busy(one(home, "home-workouts"))).toBe(false);
 
     // A week that came from the cache loads its own neighbours in turn.
     await settle();
@@ -369,11 +425,11 @@ describe("Home, mounted", () => {
     expect(busy(one(home, "week-strip"))).toBe(false);
     expect(plans(home)).toEqual(["U1", "", "", "", "", "", ""]);
     expect(logged(home)).toEqual([]);
-    expect(busy(one(home, "list"))).toBe(false);
+    expect(busy(one(home, "home-workouts"))).toBe(false);
     await settle(); // its own reload
   });
 
-  it("keeps the week last on screen in the rows, busy and then dimmed, while the next one loads", async () => {
+  it("keeps the week last on screen in the workouts, busy and then dimmed, while the next one loads", async () => {
     const s = makeServices();
     await mondays(s);
     const weeks = watchWeeks(s, "2026-11-02");
@@ -386,23 +442,23 @@ describe("Home, mounted", () => {
     expect(title(home)).toBe("2 Weeks Ago");
     expect(busy(one(home, "week-strip"))).toBe(true);
     expect(plans(home)).toEqual(["", "", "", "", "", "", ""]);
-    // Last week's rows (the ones just shown), not this week's.
+    // Last week's workouts (the ones just shown), not this week's.
     expect(logged(home)).toEqual(["Lower"]);
-    const rows = one(home, "list");
+    const rows = one(home, "home-workouts");
     expect(busy(rows)).toBe(true);
     expect(rows.getAttribute("data-stale")).toBeNull();
 
-    await settle(200); // past the 150 ms before busy rows are dimmed
+    await settle(200); // past the 150 ms before busy workouts are dimmed
     expect(logged(home)).toEqual(["Lower"]);
-    expect(one(home, "list").getAttribute("data-stale")).toBe("true");
+    expect(one(home, "home-workouts").getAttribute("data-stale")).toBe("true");
 
     weeks.release();
     await settle();
     expect(busy(one(home, "week-strip"))).toBe(false);
     expect(plans(home)).toEqual(["U1", "", "", "", "", "", ""]);
     expect(logged(home)).toEqual([]);
-    expect(busy(one(home, "list"))).toBe(false);
-    expect(one(home, "list").getAttribute("data-stale")).toBeNull();
+    expect(busy(one(home, "home-workouts"))).toBe(false);
+    expect(one(home, "home-workouts").getAttribute("data-stale")).toBeNull();
   });
 });
 
@@ -600,6 +656,232 @@ describe("Workout Days holds, mounted", () => {
   });
 });
 
+describe("Workout Days gestures, mounted", () => {
+  type Grip = { onPointerDown: (e: unknown) => void; onKeyDown: (e: unknown) => void };
+  type Press = { onClick: () => void };
+
+  async function mountSetup(s: AppServices, openDayId?: string): Promise<FakeElement> {
+    const host = mount(
+      createElement(ServicesProvider, {
+        services: s,
+        children: createElement(CenterPage, { page: "setup", enter: false, children: createElement(SetupScreen, { openDayId }) }),
+      }),
+    );
+    await settle();
+    return host;
+  }
+
+  async function daysNamed(...names: string[]): Promise<AppServices> {
+    const s = makeServices();
+    for (const name of names) await s.setup.createDay(name);
+    return s;
+  }
+
+  const slots = (host: FakeElement) => byClass(host, "day-slot");
+  const slotNames = (host: FakeElement) => slots(host).map((slot) => one(slot, "title").textContent);
+  const head = (host: FakeElement, name: string) => one(slots(host).find((slot) => one(slot, "title").textContent === name)!, "day-card-head");
+  const stored = async (s: AppServices) => (await s.setup.days()).map((d) => d.name);
+  const held = (host: FakeElement) => byClass(host, "is-held").length > 0;
+  const labelled = (host: FakeElement, label: string) => findAll(host, (el) => el.getAttribute("aria-label") === label)[0]!;
+
+  /** Lays `els` out top to bottom in their current order in the page: `height` tall, `gap` apart. */
+  function layOut(els: () => FakeElement[], height: number, gap: number): void {
+    for (const el of els()) {
+      Object.assign(el, {
+        getBoundingClientRect: () => {
+          const top = els().indexOf(el) * (height + gap);
+          return { top, bottom: top + height, left: 0, right: 300, width: 300, height };
+        },
+      });
+    }
+  }
+
+  // The pointer, as the browser reports it: down on the grip (React), then moves on the window.
+  const press = (grip: FakeElement, x: number, y: number, pointerType = "touch") =>
+    act(() => reactProps<Grip>(grip).onPointerDown({ pointerId: 1, pointerType, button: 0, clientX: x, clientY: y, currentTarget: grip }));
+  const moveTo = (x: number, y: number) => act(() => fireWindow("pointermove", { pointerId: 1, clientX: x, clientY: y }));
+  const release = (x: number, y: number) => act(() => fireWindow("pointerup", { pointerId: 1, clientX: x, clientY: y }));
+  const keyDown = (grip: FakeElement, key: string, altKey = true) =>
+    act(() => reactProps<Grip>(grip).onKeyDown({ key, altKey, ctrlKey: false, metaKey: false, shiftKey: false, preventDefault() {} }));
+  /** A touchmove on the list: true when it was cancelled (the page doesn't scroll). */
+  function touchMoveCancelled(list: FakeElement): boolean {
+    const preventDefault = vi.fn();
+    list.fire("touchmove", { cancelable: true, preventDefault });
+    return preventDefault.mock.calls.length > 0;
+  }
+  /** A click made by a press, reaching the list: true when the list swallowed it. */
+  function clickSwallowed(list: FakeElement): boolean {
+    const stopPropagation = vi.fn();
+    list.fire("click", { detail: 1, stopPropagation, preventDefault() {} });
+    return stopPropagation.mock.calls.length > 0;
+  }
+
+  it("lifts a held day, slides the others aside, and drops it in its new place, with no click after", async () => {
+    const s = await daysNamed("A", "B", "C");
+    const host = await mountSetup(s);
+    layOut(() => slots(host), 80, 10);
+    const list = one(host, "day-cards");
+
+    press(head(host, "A"), 100, 40);
+    expect(touchMoveCancelled(list)).toBe(false); // before the hold, a finger still scrolls the page
+    await settle(HOLD_MS + 50);
+    const [a, b, c] = slots(host);
+    expect(a!.getAttribute("class")).toBe("day-slot is-dragging");
+    expect(held(host)).toBe(true);
+    expect(touchMoveCancelled(list)).toBe(true); // lifted: the page stays put
+
+    moveTo(100, 190); // 150 px down: past B's and C's middles
+    expect(a!.style.transform).toBe("translateY(150px)");
+    expect(b!.style.transform).toBe("translateY(-90px)");
+    expect(c!.style.transform).toBe("translateY(-90px)");
+    release(100, 190);
+    expect(slotNames(host)).toEqual(["B", "C", "A"]); // at once, before the save lands
+    await settle();
+    expect(await stored(s)).toEqual(["B", "C", "A"]);
+    expect(slotNames(host)).toEqual(["B", "C", "A"]);
+    expect(slots(host).map((slot) => slot.style.transform)).toEqual(["", "", ""]);
+    expect(held(host)).toBe(false);
+    // The click that ends the drag doesn't open the card; the next press's does.
+    expect(clickSwallowed(list)).toBe(true);
+    expect(clickSwallowed(list)).toBe(false);
+  });
+
+  it("leaves a tap, a scroll and a hold let go in place as they were", async () => {
+    const s = await daysNamed("A", "B", "C");
+    const host = await mountSetup(s);
+    layOut(() => slots(host), 80, 10);
+    const list = one(host, "day-cards");
+
+    // A tap: the card's own click goes through.
+    press(head(host, "B"), 100, 130);
+    release(100, 130);
+    expect(clickSwallowed(list)).toBe(false);
+    // A finger moving up or down before the hold: a scroll, so nothing lifts.
+    press(head(host, "B"), 100, 130);
+    moveTo(102, 160);
+    await settle(HOLD_MS + 50);
+    expect(byClass(host, "is-dragging")).toHaveLength(0);
+    release(102, 160);
+    // Held, then let go without moving: nothing moves, and the card doesn't toggle.
+    press(head(host, "B"), 100, 130);
+    await settle(HOLD_MS + 50);
+    expect(byClass(host, "is-dragging")).toHaveLength(1);
+    release(100, 130);
+    await settle();
+    expect(clickSwallowed(list)).toBe(true);
+    expect(await stored(s)).toEqual(["A", "B", "C"]);
+    expect(byClass(host, "is-dragging")).toHaveLength(0);
+  });
+
+  it("swipes a day right to uncover Delete, back to cover it, and deletes at once without asking", async () => {
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirm);
+    const s = await daysNamed("A", "B");
+    const host = await mountSetup(s);
+    layOut(() => slots(host), 80, 10);
+    const slotB = slots(host)[1]!;
+    const card = one(slotB, "day-card");
+    const deleteB = one(slotB, "day-delete");
+    expect(deleteB.getAttribute("inert")).toBe(""); // covered: out of reach
+
+    press(head(host, "B"), 50, 120);
+    moveTo(70, 122); // sideways: a swipe, following the finger
+    expect(slotB.getAttribute("class")).toBe("day-slot is-swiping");
+    expect(card.style.transform).toBe("translateX(20px)");
+    moveTo(110, 122);
+    expect(card.style.transform).toBe("translateX(60px)");
+    release(110, 122); // past half way: stays open (its class holds it there)
+    expect(slotB.getAttribute("class")).toBe("day-slot is-revealed");
+    expect(card.style.transform).toBe("");
+    expect(deleteB.getAttribute("inert")).toBeNull();
+    expect(held(host)).toBe(true);
+
+    // Swiped back past half way: covered again.
+    press(head(host, "B"), 110, 120);
+    moveTo(60, 120);
+    release(60, 120);
+    expect(slotB.getAttribute("class")).toBe("day-slot");
+    expect(held(host)).toBe(false);
+
+    press(head(host, "B"), 50, 120);
+    moveTo(120, 120);
+    release(120, 120);
+    expect(deleteB.getAttribute("aria-label")).toBe("Delete B");
+    await act(async () => reactProps<Press>(deleteB).onClick());
+    await settle();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(await stored(s)).toEqual(["A"]);
+    expect(slotNames(host)).toEqual(["A"]);
+    expect(held(host)).toBe(false);
+  });
+
+  it("moves a day with Alt + arrow keys, saving quick moves in turn", async () => {
+    const s = await daysNamed("A", "B", "C", "D");
+    const host = await mountSetup(s);
+    keyDown(head(host, "A"), "ArrowDown");
+    expect(slotNames(host)).toEqual(["B", "A", "C", "D"]);
+    keyDown(head(host, "A"), "ArrowUp"); // before the first move has saved
+    expect(slotNames(host)).toEqual(["A", "B", "C", "D"]);
+    await settle();
+    expect(await stored(s)).toEqual(["A", "B", "C", "D"]);
+
+    keyDown(head(host, "C"), "ArrowDown", false); // a plain arrow scrolls, as usual
+    keyDown(head(host, "D"), "ArrowDown"); // already last
+    await settle();
+    expect(await stored(s)).toEqual(["A", "B", "C", "D"]);
+    keyDown(head(host, "C"), "ArrowUp");
+    await settle();
+    expect(await stored(s)).toEqual(["A", "C", "B", "D"]);
+
+    // Delete uncovers the day's Delete (for the keyboard to reach); Escape covers it again.
+    keyDown(head(host, "B"), "Delete", false);
+    expect(slots(host)[2]!.getAttribute("class")).toBe("day-slot is-revealed");
+    keyDown(head(host, "B"), "Escape", false);
+    expect(slots(host)[2]!.getAttribute("class")).toBe("day-slot");
+  });
+
+  it("drags an exercise by its handle, removes one at once with the button right of ⋮, and keeps ⋮ for the rest", async () => {
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirm);
+    const s = makeServices();
+    const day = await s.setup.createDay("Upper");
+    await s.setup.updateDay(day.id, (d) => d.addExercise("Pull").addExercise("Press").addExercise("Curl"));
+    const host = await mountSetup(s, day.id);
+    const rows = () => byClass(host, "with-grip").filter((el) => el.getAttribute("class")!.startsWith("ex-edit "));
+    layOut(rows, 50, 0);
+    const handles = () => byClass(host, "ex-grip").map((g) => g.getAttribute("aria-label"));
+    const exercises = async () => (await s.setup.days())[0]!.activeExercises().map((e) => e.name);
+    expect(handles()).toEqual(["Move Pull", "Move Press", "Move Curl"]);
+
+    press(labelled(host, "Move Pull"), 10, 25);
+    await settle(HOLD_MS + 50);
+    expect(rows()[0]!.getAttribute("class")).toBe("ex-edit with-grip is-dragging");
+    moveTo(10, 85); // 60 px down: past Press's middle, not Curl's
+    expect(rows()[1]!.style.transform).toBe("translateY(-50px)");
+    expect(rows()[2]!.style.transform).toBe("");
+    release(10, 85);
+    await settle();
+    expect(await exercises()).toEqual(["Press", "Pull", "Curl"]);
+    expect(handles()).toEqual(["Move Press", "Move Pull", "Move Curl"]);
+
+    keyDown(labelled(host, "Move Press"), "ArrowDown", false); // a handle takes plain arrows
+    await settle();
+    expect(await exercises()).toEqual(["Pull", "Press", "Curl"]);
+
+    act(() => reactProps<Press>(labelled(host, "More for Pull")).onClick());
+    const menu = one(host, "ex-edit-menu").textContent;
+    expect(menu).toContain("Make it done / not done");
+    expect(menu).toContain("Log in plates");
+    for (const gone of ["Up", "Down", "Remove"]) expect(menu).not.toContain(gone);
+
+    await act(async () => reactProps<Press>(labelled(host, "Remove Press")).onClick());
+    await settle();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(await exercises()).toEqual(["Pull", "Curl"]);
+    expect((await s.setup.days())[0]!.allExercises().find((e) => e.name === "Press")?.archived).toBe(true); // history kept
+  });
+});
+
 describe("Sheet, mounted", () => {
   type BackdropProps = { onPointerDown: (e: unknown) => void; onClick: (e: unknown) => void };
 
@@ -628,6 +910,135 @@ describe("Sheet, mounted", () => {
     expect(onClose).not.toHaveBeenCalled();
     press(backdrop, backdrop);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Calendar, mounted", () => {
+  beforeEach(() => {
+    // What the screen remembers until the app closes (useViewState): the year and the open month.
+    setViewState("calendar.year", null);
+    setViewState("calendar.month", null);
+  });
+
+  /** Upper 1, planned on Mondays, logged on Mon Nov 16, 2026 (today is Fri Nov 20). */
+  async function withUpper(): Promise<{ s: AppServices; upperId: string }> {
+    const s = makeServices();
+    let upper = await s.setup.createDay("Upper 1");
+    upper = (await s.setup.updateDay(upper.id, (x) => x.addExercise("Pulldown")))!;
+    await s.setup.setPlanned(0, upper.id);
+    await s.sessions.saveLog(upper.id, d("2026-11-16"), ExerciseLog.empty(upper.activeExercises()[0]!.id).withSets([new SetEntry(100, 8)]));
+    return { s, upperId: upper.id };
+  }
+
+  const screen = (s: AppServices, year: number | null) => createElement(ServicesProvider, { services: s, children: createElement(CalendarScreen, { year }) });
+
+  /** The calendar at `year` (null: the Calendar tab, #/calendar), loaded. */
+  async function openCalendar(s: AppServices, year: number | null = 2026): Promise<FakeElement> {
+    const host = mount(screen(s, year));
+    await settle();
+    return host;
+  }
+
+  const labelled = (node: FakeNode, label: string) => findAll(node, (el) => el.getAttribute("aria-label") === label)[0];
+  const tile = (host: FakeElement, name: string) => labelled(host, name) ?? fail(`No tile for ${name}`);
+  /** The popped-out month (its dialog), drawn into <body>. */
+  const month = () => byClass(doc.body, "month-pop")[0] ?? null;
+  const sheet = () => byClass(doc.body, "sheet")[0] ?? null;
+  /** A date's button in the popped-out month, by its label's start ("Wed, Nov 18"). */
+  const date = (label: string) =>
+    findAll(month() ?? fail("No month open"), (el) => el.tagName === "BUTTON" && (el.getAttribute("aria-label") ?? "").startsWith(label))[0] ??
+    fail(`No button for ${label}`);
+  const fail = (message: string): never => {
+    throw new Error(message);
+  };
+
+  it("makes each month one button with its days as plain text, and pops a month out bigger with its dates to tap", async () => {
+    const { s } = await withUpper();
+    const host = await openCalendar(s);
+    // The year view: twelve buttons, one per month; no day is a button.
+    const buttons = findAll(host, (el) => el.tagName === "BUTTON");
+    expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(MONTH_LONG.map((m) => `${m} 2026`));
+    expect(byClass(host, "month-day")).toHaveLength(365);
+    expect(month()).toBeNull();
+
+    tap(tile(host, "November 2026"));
+    const dialog = month()!;
+    expect(dialog.getAttribute("role")).toBe("dialog");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(doc.getElementById(dialog.getAttribute("aria-labelledby")!)?.textContent).toBe("November 2026");
+    // Over the page, not in it (the page moves while it animates), and focus moved into it.
+    expect(dialog.parentNode?.parentNode).toBe(doc.body);
+    expect(doc.activeElement).toBe(dialog);
+    expect(findAll(dialog, (el) => el.tagName === "BUTTON")).toHaveLength(30);
+    expect(date("Mon, Nov 16").getAttribute("aria-label")).toBe("Mon, Nov 16, worked out");
+    expect(date("Fri, Nov 20").getAttribute("class")).toBe("cal-day today");
+  });
+
+  it("opens a date's one session from the popped-out month, or its sheet on top of the month", async () => {
+    const { s, upperId } = await withUpper();
+    const host = await openCalendar(s);
+    tap(tile(host, "November 2026"));
+    tap(date("Mon, Nov 16"));
+    expect(navigate).toHaveBeenCalledWith({ name: "session", dayId: upperId, date: "2026-11-16" });
+
+    tap(date("Wed, Nov 18"));
+    expect(sheet()?.textContent).toContain("Wed, Nov 18");
+    expect(month()).not.toBeNull();
+    // Drawn after the month in <body> (and on a higher layer in CSS), so it's on top.
+    const layers = doc.body.childNodes.map((n) => (n as FakeElement).getAttribute?.("class"));
+    expect(layers.indexOf("sheet-backdrop")).toBeGreaterThan(layers.indexOf("month-pop-layer"));
+  });
+
+  it("closes one layer per tap outside: the date's sheet, then the month, and gives focus back to the month's tile", async () => {
+    const { s } = await withUpper();
+    const host = await openCalendar(s);
+    tap(tile(host, "November 2026"));
+    tap(date("Wed, Nov 18"));
+
+    tap(one(doc.body, "sheet-backdrop"));
+    expect(sheet()).toBeNull();
+    expect(month()).not.toBeNull();
+
+    // A press that starts on the month and is let go outside clicks the layer they share: still open.
+    tap(date("Thu, Nov 19"), one(doc.body, "month-pop-layer"));
+    expect(month()).not.toBeNull();
+
+    tap(one(doc.body, "month-pop-scrim"));
+    expect(month()).toBeNull();
+    expect(doc.activeElement).toBe(tile(host, "November 2026"));
+  });
+
+  it("closes one layer per Escape: the date's sheet, then the month", async () => {
+    const { s } = await withUpper();
+    const host = await openCalendar(s);
+    tap(tile(host, "November 2026"));
+    tap(date("Wed, Nov 18"));
+
+    pressKey("Escape");
+    expect(sheet()).toBeNull();
+    expect(month()).not.toBeNull();
+
+    pressKey("Escape");
+    expect(month()).toBeNull();
+    expect(doc.activeElement).toBe(tile(host, "November 2026"));
+  });
+
+  it("brings the month back on Back from a session it opened, and closes it for another year", async () => {
+    const { s } = await withUpper();
+    const host = await openCalendar(s, null); // the Calendar tab
+    tap(tile(host, "November 2026"));
+    tap(date("Mon, Nov 16"));
+    expect(navigate).toHaveBeenCalledTimes(1);
+    unmount(); // the session screen replaces the calendar
+    expect(month()).toBeNull();
+
+    await openCalendar(s, null); // Back
+    expect(month()?.textContent).toContain("November 2026");
+
+    rerender(screen(s, 2025));
+    expect(month()).toBeNull();
+    rerender(screen(s, 2026)); // and coming back to 2026 doesn't open it again
+    expect(month()).toBeNull();
   });
 });
 

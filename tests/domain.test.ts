@@ -182,12 +182,33 @@ describe("WorkoutDay", () => {
   it("adds, moves, and archives exercises without losing them", () => {
     let day = WorkoutDay.create("Upper 1", 0).addExercise("A").addExercise("B").addExercise("C");
     const [a, , c] = day.activeExercises();
-    day = day.moveExercise(c!.id, -1);
+    day = day.moveExerciseTo(c!.id, 1);
     expect(day.activeExercises().map((e) => e.name)).toEqual(["A", "C", "B"]);
     day = day.archiveExercise(a!.id);
     expect(day.activeExercises().map((e) => e.name)).toEqual(["C", "B"]);
     expect(day.allExercises()).toHaveLength(3);
     expect(WorkoutDay.from(day.toJSON()).toJSON()).toEqual(day.toJSON());
+  });
+
+  it("moves an active exercise to a place in the list (a drag), clamped, with removed ones kept after", () => {
+    let day = WorkoutDay.create("Upper 1", 0).addExercise("A").addExercise("B").addExercise("C").addExercise("D");
+    const [a, b, c, d] = day.allExercises();
+    day = day.archiveExercise(b!.id); // removed, between A and C
+    const names = (x: WorkoutDay) => x.allExercises().map((e) => `${e.name}${e.archived ? " (removed)" : ""}`);
+
+    expect(names(day.moveExerciseTo(d!.id, 0))).toEqual(["D", "A", "C", "B (removed)"]);
+    expect(names(day.moveExerciseTo(a!.id, 2))).toEqual(["C", "D", "A", "B (removed)"]);
+    expect(names(day.moveExerciseTo(a!.id, 1))).toEqual(["C", "A", "D", "B (removed)"]);
+    // Past either end: first or last. Places count active exercises only.
+    expect(names(day.moveExerciseTo(c!.id, 99))).toEqual(["A", "D", "C", "B (removed)"]);
+    expect(names(day.moveExerciseTo(c!.id, -5))).toEqual(["C", "A", "D", "B (removed)"]);
+    // Nothing to move: the same day.
+    expect(day.moveExerciseTo(c!.id, 1)).toBe(day);
+    expect(day.moveExerciseTo(b!.id, 0)).toBe(day); // removed
+    expect(day.moveExerciseTo("nope", 0)).toBe(day);
+    expect(day.moveExerciseTo(c!.id, Number.NaN)).toBe(day);
+    // Immutable: the original keeps its order.
+    expect(names(day)).toEqual(["A", "B (removed)", "C", "D"]);
   });
 });
 
