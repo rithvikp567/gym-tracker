@@ -20,7 +20,7 @@ import { customThemeTokens, LOOK_KEY } from "../src/ui/theme/look";
 /*
  * The color picker mounted with react-dom next to LookSync, so the rules about what it saves
  * and what it shows are checked end to end: dragging previews on <html> and writes nothing,
- * Done writes one settings update, and every way out without Done (Cancel, Escape, a tap
+ * Use color writes one settings update, and every way out without it (Cancel, Escape, a tap
  * outside, leaving the screen, a route change) puts the saved look back.
  *
  * Tests run in Node with no DOM library, so this is a small stand-in for the DOM: what React
@@ -166,6 +166,16 @@ class FakeElement extends FakeNode {
   }
 
   focus(): void {}
+  private captured = new Set<number>();
+  setPointerCapture(id: number): void {
+    this.captured.add(id);
+  }
+  releasePointerCapture(id: number): void {
+    this.captured.delete(id);
+  }
+  hasPointerCapture(id: number): boolean {
+    return this.captured.has(id);
+  }
 
   /** Enough of closest() for `[name="value"]` and `.class`. */
   closest(selector: string): FakeElement | null {
@@ -336,7 +346,7 @@ afterEach(() => {
 });
 
 describe("the color picker", () => {
-  it("previews while you drag, on this device only, and Done saves once", () => {
+  it("previews a slider move on this device only, and Use color saves once", () => {
     const update = vi.spyOn(services.settings, "update");
     const writes = vi.spyOn(localStorage, "setItem");
     click(byLabel("Custom accent color"));
@@ -353,7 +363,7 @@ describe("the color picker", () => {
     // Colors follow the drag at once: base.css turns transitions off while this is on <html>.
     expect(html.getAttribute("data-look-preview")).toBe("");
 
-    click(button("Done"));
+    click(button("Use color"));
     expect(pickerOpen()).toBe(false);
     expect(html.getAttribute("data-look-preview")).toBeNull();
     expect(update).toHaveBeenCalledTimes(1);
@@ -362,6 +372,29 @@ describe("the color picker", () => {
     expect(update).toHaveBeenCalledWith({ accent: "custom", customAccentColor: picked, recentAccentColors: [picked] });
     expect(shown().accent).toBe("custom");
     expect(JSON.parse(saved.get(LOOK_KEY)!)).toMatchObject({ accent: "custom" });
+  });
+
+  it("applies a wheel drag to the page when you let go, not while you hold, and saves only on Use color", async () => {
+    const frame = () => act(async () => void (await new Promise((r) => setTimeout(r, 5)))); // the wheel applies moves once per frame
+    const update = vi.spyOn(services.settings, "update");
+    click(byLabel("Custom accent color"));
+    const wheel = byClass("cp-wheel")[0]!;
+    act(() => {
+      dispatch(wheel, "pointerdown", { clientX: 20, clientY: 50 });
+      dispatch(wheel, "pointermove", { clientX: 25, clientY: 60 });
+    });
+    await frame();
+    // Held: the picker follows, the page still shows what it had.
+    const [before, after] = byClass("cp-compare")[0]!.childNodes as unknown as FakeElement[];
+    expect(after!.style.getPropertyValue("--swatch")).not.toBe(before!.style.getPropertyValue("--swatch"));
+    expect(shown()).toEqual({ theme: "oled", accent: "lime", vars: {} });
+    act(() => dispatch(win, "pointerup"));
+    await frame();
+    expect(shown().accent).toBe("custom"); // let go: applied at once
+    expect(update).not.toHaveBeenCalled(); // but not kept until Use color
+    click(button("Use color"));
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(services.settings.get().accent).toBe("custom");
   });
 
   it("puts the saved look back on Cancel, Escape and a tap outside, saving nothing", () => {

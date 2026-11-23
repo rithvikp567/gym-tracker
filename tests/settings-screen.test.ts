@@ -58,13 +58,14 @@ describe("Settings screen", () => {
     expect(titles).toEqual(["Account and sync", "Workouts", "Appearance"]);
   });
 
-  it("folds Appearance under a drop-down, closed at first, that names the theme and accent", () => {
+  it("folds Appearance under a \"Theme and Accent Color\" drop-down, closed at first, with no grey sub text", () => {
     setViewState(APPEARANCE_OPEN, false);
     const services = makeServices();
     services.settings.update({ theme: "sand", accent: "teal" });
     const html = render(services);
     expect(html).toMatch(/<section class="card day-card" aria-label="Appearance"><button type="button" class="day-card-head" aria-expanded="false"/);
-    expect(html).toContain("Sand theme · Teal accent");
+    expect(html).toContain('<span class="title">Theme and Accent Color</span></span>');
+    expect(html.slice(html.indexOf('aria-label="Appearance"'))).not.toContain('class="meta"');
     expect(html).not.toContain('role="radio"'); // no swatches or theme tiles until it's opened
     setViewState(APPEARANCE_OPEN, true);
     const open = render(services);
