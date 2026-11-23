@@ -22,6 +22,7 @@ import { CalendarScreen } from "../src/ui/screens/CalendarScreen";
 import { DayScreen } from "../src/ui/screens/DayScreen";
 import { HomeScreen } from "../src/ui/screens/HomeScreen";
 import { SessionScreen } from "../src/ui/screens/session/SessionScreen";
+import { SetupScreen } from "../src/ui/screens/SetupScreen";
 import { prefetchLive, ServicesProvider } from "../src/ui/ServicesContext";
 
 /*
@@ -398,5 +399,43 @@ describe("Day screen", () => {
     const html = render(s, DayScreen, { date: "2026-11-15" });
     expect(html).not.toContain("Rest day");
     expect(html).not.toContain("Nothing planned");
+  });
+});
+
+describe("Workout Days", () => {
+  /** The same load as SetupScreen's, under its key. */
+  const cacheSetup = (s: AppServices) => prefetchLive(s, "setup", [], async () => ({ days: await s.setup.days(), split: await s.setup.split() }));
+
+  it("moves and deletes days by gesture: no Move up, Move down or Delete day in an open card", async () => {
+    const s = makeServices();
+    const { upper } = await upperAndLower(s);
+    await cacheSetup(s);
+    const html = render(s, SetupScreen, { openDayId: upper.id });
+    expect(html).toContain("Pulldown"); // the card is open
+    expect(html).not.toContain("Move up");
+    expect(html).not.toContain("Move down");
+    expect(html).not.toContain("Delete day");
+    // Each day sits in a slot over its own Delete, which is out of reach until swiped to.
+    expect(count(html, 'class="day-slot"')).toBe(2);
+    expect(html).toMatch(/<button[^>]*class="day-delete"[^>]*inert=""[^>]*aria-label="Delete Upper 1"/);
+    expect(html).toMatch(/<button[^>]*class="day-delete"[^>]*inert=""[^>]*aria-label="Delete Lower"/);
+    expect(html).toContain('aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Delete"');
+  });
+
+  it("gives each exercise a handle on the left and Remove right of its ⋮", async () => {
+    const s = makeServices();
+    const { upper } = await upperAndLower(s);
+    await s.setup.updateDay(upper.id, (x) => x.addExercise("Triceps"));
+    await cacheSetup(s);
+    const html = render(s, SetupScreen, { openDayId: upper.id });
+    const row = html.slice(html.indexOf('class="ex-edit with-grip"'));
+    const order = ['aria-label="Move Pulldown"', 'aria-label="Exercise name"', 'aria-label="Pulldown sets"', 'aria-label="More for Pulldown"', 'aria-label="Remove Pulldown"'].map((a) =>
+      row.indexOf(a),
+    );
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(html).toContain('aria-label="Move Triceps"');
+    expect(html).toContain('aria-label="Remove Triceps"');
+    expect(count(html, 'class="icon-btn danger"')).toBe(2);
   });
 });

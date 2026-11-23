@@ -20,6 +20,7 @@ import { CenterPage, useHoldBriefly, usePageHold } from "../src/ui/components/Ce
 import { Sheet } from "../src/ui/components/controls";
 import { HOME_PICK_KEY, homePick, rememberHomeDay } from "../src/ui/homePick";
 import { useDayStep } from "../src/ui/hooks/useDayStep";
+import { HOLD_MS } from "../src/ui/hooks/useDragList";
 import { useLookVersion } from "../src/ui/hooks/useLookVersion";
 import { useSwipe } from "../src/ui/hooks/useSwipe";
 import { setViewState } from "../src/ui/hooks/useViewState";
@@ -210,7 +211,7 @@ class FakeDocument extends FakeNode {
 }
 
 const doc = new FakeDocument();
-/** Listeners on `window` (Escape for sheets and the popped-out month). */
+/** Listeners on `window`: Escape for sheets and the popped-out month, a drag following the pointer (`fireWindow`). */
 const winListeners: { type: string; listener: Listener; capture: boolean }[] = [];
 const win = {
   document: doc,
@@ -225,6 +226,10 @@ const win = {
   },
 };
 doc.defaultView = win;
+
+function fireWindow(type: string, event: Record<string, unknown>): void {
+  for (const l of winListeners.filter((x) => x.type === type)) l.listener({ type, ...event });
+}
 
 let mounted: { root: Root; container: FakeElement } | null = null;
 
@@ -648,6 +653,232 @@ describe("Workout Days holds, mounted", () => {
       expect(held(host), how).toBe(true);
       unmount();
     }
+  });
+});
+
+describe("Workout Days gestures, mounted", () => {
+  type Grip = { onPointerDown: (e: unknown) => void; onKeyDown: (e: unknown) => void };
+  type Press = { onClick: () => void };
+
+  async function mountSetup(s: AppServices, openDayId?: string): Promise<FakeElement> {
+    const host = mount(
+      createElement(ServicesProvider, {
+        services: s,
+        children: createElement(CenterPage, { page: "setup", enter: false, children: createElement(SetupScreen, { openDayId }) }),
+      }),
+    );
+    await settle();
+    return host;
+  }
+
+  async function daysNamed(...names: string[]): Promise<AppServices> {
+    const s = makeServices();
+    for (const name of names) await s.setup.createDay(name);
+    return s;
+  }
+
+  const slots = (host: FakeElement) => byClass(host, "day-slot");
+  const slotNames = (host: FakeElement) => slots(host).map((slot) => one(slot, "title").textContent);
+  const head = (host: FakeElement, name: string) => one(slots(host).find((slot) => one(slot, "title").textContent === name)!, "day-card-head");
+  const stored = async (s: AppServices) => (await s.setup.days()).map((d) => d.name);
+  const held = (host: FakeElement) => byClass(host, "is-held").length > 0;
+  const labelled = (host: FakeElement, label: string) => findAll(host, (el) => el.getAttribute("aria-label") === label)[0]!;
+
+  /** Lays `els` out top to bottom in their current order in the page: `height` tall, `gap` apart. */
+  function layOut(els: () => FakeElement[], height: number, gap: number): void {
+    for (const el of els()) {
+      Object.assign(el, {
+        getBoundingClientRect: () => {
+          const top = els().indexOf(el) * (height + gap);
+          return { top, bottom: top + height, left: 0, right: 300, width: 300, height };
+        },
+      });
+    }
+  }
+
+  // The pointer, as the browser reports it: down on the grip (React), then moves on the window.
+  const press = (grip: FakeElement, x: number, y: number, pointerType = "touch") =>
+    act(() => reactProps<Grip>(grip).onPointerDown({ pointerId: 1, pointerType, button: 0, clientX: x, clientY: y, currentTarget: grip }));
+  const moveTo = (x: number, y: number) => act(() => fireWindow("pointermove", { pointerId: 1, clientX: x, clientY: y }));
+  const release = (x: number, y: number) => act(() => fireWindow("pointerup", { pointerId: 1, clientX: x, clientY: y }));
+  const keyDown = (grip: FakeElement, key: string, altKey = true) =>
+    act(() => reactProps<Grip>(grip).onKeyDown({ key, altKey, ctrlKey: false, metaKey: false, shiftKey: false, preventDefault() {} }));
+  /** A touchmove on the list: true when it was cancelled (the page doesn't scroll). */
+  function touchMoveCancelled(list: FakeElement): boolean {
+    const preventDefault = vi.fn();
+    list.fire("touchmove", { cancelable: true, preventDefault });
+    return preventDefault.mock.calls.length > 0;
+  }
+  /** A click made by a press, reaching the list: true when the list swallowed it. */
+  function clickSwallowed(list: FakeElement): boolean {
+    const stopPropagation = vi.fn();
+    list.fire("click", { detail: 1, stopPropagation, preventDefault() {} });
+    return stopPropagation.mock.calls.length > 0;
+  }
+
+  it("lifts a held day, slides the others aside, and drops it in its new place, with no click after", async () => {
+    const s = await daysNamed("A", "B", "C");
+    const host = await mountSetup(s);
+    layOut(() => slots(host), 80, 10);
+    const list = one(host, "day-cards");
+
+    press(head(host, "A"), 100, 40);
+    expect(touchMoveCancelled(list)).toBe(false); // before the hold, a finger still scrolls the page
+    await settle(HOLD_MS + 50);
+    const [a, b, c] = slots(host);
+    expect(a!.getAttribute("class")).toBe("day-slot is-dragging");
+    expect(held(host)).toBe(true);
+    expect(touchMoveCancelled(list)).toBe(true); // lifted: the page stays put
+
+    moveTo(100, 190); // 150 px down: past B's and C's middles
+    expect(a!.style.transform).toBe("translateY(150px)");
+    expect(b!.style.transform).toBe("translateY(-90px)");
+    expect(c!.style.transform).toBe("translateY(-90px)");
+    release(100, 190);
+    expect(slotNames(host)).toEqual(["B", "C", "A"]); // at once, before the save lands
+    await settle();
+    expect(await stored(s)).toEqual(["B", "C", "A"]);
+    expect(slotNames(host)).toEqual(["B", "C", "A"]);
+    expect(slots(host).map((slot) => slot.style.transform)).toEqual(["", "", ""]);
+    expect(held(host)).toBe(false);
+    // The click that ends the drag doesn't open the card; the next press's does.
+    expect(clickSwallowed(list)).toBe(true);
+    expect(clickSwallowed(list)).toBe(false);
+  });
+
+  it("leaves a tap, a scroll and a hold let go in place as they were", async () => {
+    const s = await daysNamed("A", "B", "C");
+    const host = await mountSetup(s);
+    layOut(() => slots(host), 80, 10);
+    const list = one(host, "day-cards");
+
+    // A tap: the card's own click goes through.
+    press(head(host, "B"), 100, 130);
+    release(100, 130);
+    expect(clickSwallowed(list)).toBe(false);
+    // A finger moving up or down before the hold: a scroll, so nothing lifts.
+    press(head(host, "B"), 100, 130);
+    moveTo(102, 160);
+    await settle(HOLD_MS + 50);
+    expect(byClass(host, "is-dragging")).toHaveLength(0);
+    release(102, 160);
+    // Held, then let go without moving: nothing moves, and the card doesn't toggle.
+    press(head(host, "B"), 100, 130);
+    await settle(HOLD_MS + 50);
+    expect(byClass(host, "is-dragging")).toHaveLength(1);
+    release(100, 130);
+    await settle();
+    expect(clickSwallowed(list)).toBe(true);
+    expect(await stored(s)).toEqual(["A", "B", "C"]);
+    expect(byClass(host, "is-dragging")).toHaveLength(0);
+  });
+
+  it("swipes a day right to uncover Delete, back to cover it, and deletes at once without asking", async () => {
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirm);
+    const s = await daysNamed("A", "B");
+    const host = await mountSetup(s);
+    layOut(() => slots(host), 80, 10);
+    const slotB = slots(host)[1]!;
+    const card = one(slotB, "day-card");
+    const deleteB = one(slotB, "day-delete");
+    expect(deleteB.getAttribute("inert")).toBe(""); // covered: out of reach
+
+    press(head(host, "B"), 50, 120);
+    moveTo(70, 122); // sideways: a swipe, following the finger
+    expect(slotB.getAttribute("class")).toBe("day-slot is-swiping");
+    expect(card.style.transform).toBe("translateX(20px)");
+    moveTo(110, 122);
+    expect(card.style.transform).toBe("translateX(60px)");
+    release(110, 122); // past half way: stays open (its class holds it there)
+    expect(slotB.getAttribute("class")).toBe("day-slot is-revealed");
+    expect(card.style.transform).toBe("");
+    expect(deleteB.getAttribute("inert")).toBeNull();
+    expect(held(host)).toBe(true);
+
+    // Swiped back past half way: covered again.
+    press(head(host, "B"), 110, 120);
+    moveTo(60, 120);
+    release(60, 120);
+    expect(slotB.getAttribute("class")).toBe("day-slot");
+    expect(held(host)).toBe(false);
+
+    press(head(host, "B"), 50, 120);
+    moveTo(120, 120);
+    release(120, 120);
+    expect(deleteB.getAttribute("aria-label")).toBe("Delete B");
+    await act(async () => reactProps<Press>(deleteB).onClick());
+    await settle();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(await stored(s)).toEqual(["A"]);
+    expect(slotNames(host)).toEqual(["A"]);
+    expect(held(host)).toBe(false);
+  });
+
+  it("moves a day with Alt + arrow keys, saving quick moves in turn", async () => {
+    const s = await daysNamed("A", "B", "C", "D");
+    const host = await mountSetup(s);
+    keyDown(head(host, "A"), "ArrowDown");
+    expect(slotNames(host)).toEqual(["B", "A", "C", "D"]);
+    keyDown(head(host, "A"), "ArrowUp"); // before the first move has saved
+    expect(slotNames(host)).toEqual(["A", "B", "C", "D"]);
+    await settle();
+    expect(await stored(s)).toEqual(["A", "B", "C", "D"]);
+
+    keyDown(head(host, "C"), "ArrowDown", false); // a plain arrow scrolls, as usual
+    keyDown(head(host, "D"), "ArrowDown"); // already last
+    await settle();
+    expect(await stored(s)).toEqual(["A", "B", "C", "D"]);
+    keyDown(head(host, "C"), "ArrowUp");
+    await settle();
+    expect(await stored(s)).toEqual(["A", "C", "B", "D"]);
+
+    // Delete uncovers the day's Delete (for the keyboard to reach); Escape covers it again.
+    keyDown(head(host, "B"), "Delete", false);
+    expect(slots(host)[2]!.getAttribute("class")).toBe("day-slot is-revealed");
+    keyDown(head(host, "B"), "Escape", false);
+    expect(slots(host)[2]!.getAttribute("class")).toBe("day-slot");
+  });
+
+  it("drags an exercise by its handle, removes one at once with the button right of ⋮, and keeps ⋮ for the rest", async () => {
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirm);
+    const s = makeServices();
+    const day = await s.setup.createDay("Upper");
+    await s.setup.updateDay(day.id, (d) => d.addExercise("Pull").addExercise("Press").addExercise("Curl"));
+    const host = await mountSetup(s, day.id);
+    const rows = () => byClass(host, "with-grip").filter((el) => el.getAttribute("class")!.startsWith("ex-edit "));
+    layOut(rows, 50, 0);
+    const handles = () => byClass(host, "ex-grip").map((g) => g.getAttribute("aria-label"));
+    const exercises = async () => (await s.setup.days())[0]!.activeExercises().map((e) => e.name);
+    expect(handles()).toEqual(["Move Pull", "Move Press", "Move Curl"]);
+
+    press(labelled(host, "Move Pull"), 10, 25);
+    await settle(HOLD_MS + 50);
+    expect(rows()[0]!.getAttribute("class")).toBe("ex-edit with-grip is-dragging");
+    moveTo(10, 85); // 60 px down: past Press's middle, not Curl's
+    expect(rows()[1]!.style.transform).toBe("translateY(-50px)");
+    expect(rows()[2]!.style.transform).toBe("");
+    release(10, 85);
+    await settle();
+    expect(await exercises()).toEqual(["Press", "Pull", "Curl"]);
+    expect(handles()).toEqual(["Move Press", "Move Pull", "Move Curl"]);
+
+    keyDown(labelled(host, "Move Press"), "ArrowDown", false); // a handle takes plain arrows
+    await settle();
+    expect(await exercises()).toEqual(["Pull", "Press", "Curl"]);
+
+    act(() => reactProps<Press>(labelled(host, "More for Pull")).onClick());
+    const menu = one(host, "ex-edit-menu").textContent;
+    expect(menu).toContain("Make it done / not done");
+    expect(menu).toContain("Log in plates");
+    for (const gone of ["Up", "Down", "Remove"]) expect(menu).not.toContain(gone);
+
+    await act(async () => reactProps<Press>(labelled(host, "Remove Press")).onClick());
+    await settle();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(await exercises()).toEqual(["Pull", "Curl"]);
+    expect((await s.setup.days())[0]!.allExercises().find((e) => e.name === "Press")?.archived).toBe(true); // history kept
   });
 });
 
