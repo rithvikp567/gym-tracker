@@ -1,6 +1,6 @@
 import { createElement, type FunctionComponent } from "react";
 import { renderToString } from "react-dom/server";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppServices } from "../src/app/AppServices";
 import { MemoryRecordStore } from "../src/data/MemoryRecordStore";
 import { NoSync } from "../src/data/NoSync";
@@ -21,6 +21,7 @@ import { setViewState } from "../src/ui/hooks/useViewState";
 import { CalendarScreen } from "../src/ui/screens/CalendarScreen";
 import { DayScreen } from "../src/ui/screens/DayScreen";
 import { HomeScreen } from "../src/ui/screens/HomeScreen";
+import { ProgressScreen } from "../src/ui/screens/progress/ProgressScreen";
 import { SessionScreen } from "../src/ui/screens/session/SessionScreen";
 import { SetupScreen } from "../src/ui/screens/SetupScreen";
 import { prefetchLive, ServicesProvider } from "../src/ui/ServicesContext";
@@ -327,6 +328,56 @@ describe("Session screen", () => {
     await cacheSession(s, upper.id, d("2026-11-20"));
     const logged = render(s, SessionScreen, props);
     expect(logged).toContain('<div class="session-foot"><button type="button" class="btn danger">');
+  });
+
+  it("shows last time's weights in the unit weights are typed in that day, and a day's own weights as saved", async () => {
+    const s = makeServices();
+    const { upper, pulldown } = await upperAndLower(s);
+    const props = { dayId: upper.id, date: "2026-11-20" };
+    const refresh = async () => {
+      await cacheDays(s);
+      await cacheSession(s, upper.id, d("2026-11-20"));
+      return render(s, SessionScreen, props);
+    };
+    await s.sessions.saveLog(upper.id, d("2026-11-13"), ExerciseLog.empty(pulldown.id).withSets([new SetEntry(185, 6), new SetEntry(185, 6)]));
+    expect(await refresh()).toContain('<span class="prefix">Last: </span>185 – 6/6');
+
+    await s.setup.setWeightUnitFrom(upper.id, pulldown.id, "kg");
+    expect(await refresh()).toContain('<span class="prefix">Last: </span>84 kg – 6/6');
+
+    // Logged in kilos today, then switched back to pounds for next time: today stays in kilos, and so does "Last".
+    await s.sessions.saveLog(upper.id, d("2026-11-20"), ExerciseLog.empty(pulldown.id).withSets([new SetEntry(80, 8)]).withUnit("kg"));
+    await s.setup.setWeightUnitFrom(upper.id, pulldown.id, "lb");
+    const html = await refresh();
+    expect(html).toContain('<div class="ex-weight">80 kg</div>');
+    expect(html).toContain('<span class="prefix">Last: </span>84 kg – 6/6');
+  });
+});
+
+describe("Progress", () => {
+  // The screen reads the series colors off the page; a server render has no page.
+  beforeEach(() => {
+    vi.stubGlobal("document", { documentElement: {} });
+    vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: () => "" }));
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("puts the title on the left and the lb / kg switch on the right, following the setting", async () => {
+    const s = makeServices();
+    const { upper, pulldown } = await upperAndLower(s);
+    await s.sessions.saveLog(upper.id, d("2026-11-16"), ExerciseLog.empty(pulldown.id).withSets([new SetEntry(185, 6)]));
+    await cacheDays(s);
+    const draw = async () => {
+      const unit = s.settings.get().progressUnit;
+      await prefetchLive(s, "progress", [upper.id, "6M", unit], () => s.progress.lines(upper.id, "6M", unit));
+      return render(s, ProgressScreen, { dayId: upper.id });
+    };
+    const lb = await draw();
+    expect(lb).toContain('<header class="screen-head has-actions tile progress-head"><div class="head-text"><h1>Progress</h1></div><div class="head-actions">');
+    expect(lb).toContain('<div class="segmented" role="group" aria-label="Chart weights in"><button type="button" aria-pressed="true">lb</button><button type="button" aria-pressed="false">kg</button>');
+    s.settings.update({ progressUnit: "kg" });
+    const kg = await draw();
+    expect(kg).toContain('<button type="button" aria-pressed="false">lb</button><button type="button" aria-pressed="true">kg</button>');
   });
 });
 

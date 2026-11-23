@@ -1,5 +1,5 @@
 import type { PastUnits } from "../domain/Exercise";
-import type { LoadUnit } from "../domain/Load";
+import type { LoadUnit, WeightUnit } from "../domain/Load";
 import type { Weekday } from "../domain/LocalDate";
 import type { Session } from "../domain/Session";
 import type { Split } from "../domain/Split";
@@ -108,6 +108,18 @@ export class SetupService {
           });
     await this.repos.sessions.saveMany(relabeled);
     await this.repos.days.save(day.withExercise(exercise.withUnit(unit, past)));
+  }
+
+  /**
+   * The kg / lb switch while logging: weights are typed in `unit` from this exercise down
+   * (WorkoutDay.withWeightUnitFrom). Saved on the workout day, so it follows you to your other
+   * devices and the next session opens in it. Nothing logged is converted or relabeled here.
+   */
+  async setWeightUnitFrom(dayId: string, exerciseId: string, unit: WeightUnit): Promise<void> {
+    const day = await this.repos.days.get(dayId);
+    if (!day) return;
+    const next = day.withWeightUnitFrom(exerciseId, unit);
+    if (next !== day) await this.repos.days.save(next);
   }
 
   /**

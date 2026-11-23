@@ -15,7 +15,7 @@ export interface ExerciseData {
   targetText: string | null;
   /** Removed from the day but kept so its history and chart line survive. */
   archived: boolean;
-  /** Pounds (default) or plates per side: what new weights are logged in. Missing in records saved before v0.3.0. */
+  /** Pounds (default), kilograms or plates per side: what new weights are logged in. Missing in records saved before v0.3.0. */
   unit?: LoadUnit;
   /**
    * The unit of weights in its logs saved without one (imported sheet rows, logs from before units

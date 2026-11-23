@@ -1,4 +1,4 @@
-import { platesToPounds, unitSuffix, type LoadUnit } from "./Load";
+import { convertLoad, unitSuffix, type LoadUnit } from "./Load";
 import { SetEntry, formatNumber, type SetEntryData } from "./SetEntry";
 
 export interface ExerciseLogData {
@@ -110,6 +110,23 @@ export class ExerciseLog {
     return new ExerciseLog(this.exerciseId, this.sets, this.done, note, this.unit);
   }
 
+  /**
+   * The same weights converted to `unit` (185 lb → 84 kg, see convertLoad), for showing last
+   * time's numbers in the unit you're logging in. Itself when a weight can't be converted
+   * (pounds → plates) or there's nothing to convert. `bareUnit` covers a log saved without a unit.
+   */
+  inUnit(unit: LoadUnit, bareUnit: LoadUnit): ExerciseLog {
+    const from = this.unitOr(bareUnit);
+    if (from === unit || this.topWeight() === null) return this;
+    const sets: SetEntry[] = [];
+    for (const s of this.sets) {
+      const weight = s.weight === null ? null : convertLoad(s.weight, from, unit);
+      if (s.weight !== null && weight === null) return this;
+      sets.push(s.withWeight(weight));
+    }
+    return new ExerciseLog(this.exerciseId, sets, this.done, this.note, unit);
+  }
+
   /** The same numbers, saved as being in `unit` (undefined = follow the exercise). Nothing is converted. */
   withUnit(unit: LoadUnit | undefined): ExerciseLog {
     return new ExerciseLog(this.exerciseId, this.sets, this.done, this.note, unit);
@@ -123,7 +140,7 @@ export class ExerciseLog {
   /**
    * Both logs as one (two merged exercises logged on the same day): this log's sets, then the
    * other's; Done if either was done, otherwise this log's answer unless unanswered; both notes,
-   * one per line. Weights in two units combine in pounds (plates convert exactly); a log without
+   * one per line. Weights in two units combine in pounds (plates exactly, kilograms to the half pound); a log without
    * weights (a note, bodyweight reps) has nothing to convert, so the other's stay in their unit.
    * `exerciseUnit` is the unit of a log saved without one.
    */
@@ -147,6 +164,6 @@ export class ExerciseLog {
 
   /** The sets with their weights in pounds, given the unit they're in. */
   private poundSets(unit: LoadUnit): SetEntry[] {
-    return this.sets.map((s) => (unit === "plates" && s.weight !== null ? s.withWeight(platesToPounds(s.weight)) : s));
+    return this.sets.map((s) => (s.weight !== null && unit !== "lb" ? s.withWeight(convertLoad(s.weight, unit, "lb")) : s));
   }
 }

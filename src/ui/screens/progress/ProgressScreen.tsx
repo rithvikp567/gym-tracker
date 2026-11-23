@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { WeightUnit } from "../../../domain/Load";
 import { RANGES, type ProgressLine, type RangeKey } from "../../../services/ProgressService";
 import { useHoldBriefly, usePageHold } from "../../components/CenterBlock";
 import { ScreenHead, Segmented } from "../../components/controls";
@@ -10,14 +11,19 @@ import { WeightChart } from "./WeightChart";
 
 const SERIES = 8;
 
+const UNITS: readonly { key: WeightUnit; label: string }[] = [
+  { key: "lb", label: "lb" },
+  { key: "kg", label: "kg" },
+];
+
 /**
  * Pick a workout day → one line per exercise. Tap the chips to show/hide lines; the weight
  * axis re-fits to whatever is visible. The picked day, range, and hidden lines are remembered
  * on this device, so leaving the tab (or the app) doesn't reset them.
  */
 export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) {
-  const { setup, progress } = useServices();
-  const { theme } = useSettings();
+  const { setup, progress, settings } = useServices();
+  const { theme, progressUnit } = useSettings();
   const holdBriefly = useHoldBriefly();
   const [range, setRange] = useViewState<RangeKey>("progress.range", () => "6M", "device");
   const [lastDayId, setLastDayId] = useViewState<string | null>("progress.day", () => null, "device");
@@ -28,7 +34,11 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
   useEffect(() => {
     if (day && day.id !== lastDayId) setLastDayId(day.id);
   }, [day, lastDayId, setLastDayId]);
-  const live = useLiveState(() => (day ? progress.lines(day.id, range) : Promise.resolve(null)), [day?.id ?? null, range], "progress");
+  const live = useLiveState(
+    () => (day ? progress.lines(day.id, range, progressUnit) : Promise.resolve(null)),
+    [day?.id ?? null, range, progressUnit],
+    "progress",
+  );
   const data = live.value;
 
   // Color follows the exercise (its slot on the day), never its position among visible lines.
@@ -65,12 +75,18 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
   const visible = lines.filter((l) => !hidden.has(l.exercise.id));
   usePageHold(tableOpen && visible.length > 0);
 
+  // Every weight in pounds or kilograms, whatever it was logged in. A setting, so it follows you to
+  // your other devices; the day and range pickers never change it (D52).
+  const unitSwitch = (
+    <Segmented label="Chart weights in" options={UNITS} value={progressUnit} onChange={(unit) => settings.update({ progressUnit: unit })} />
+  );
+
   // "No days" and "nothing logged" only from fresh data: an older copy would say so by mistake.
   if (!days || (!day && !daysLive.fresh)) return <div className="loading">Loading…</div>;
   if (!day) {
     return (
       <div className="progress">
-        <ScreenHead title="Progress" className="tile progress-head" />
+        <ScreenHead title="Progress" className="tile progress-head" actions={unitSwitch} />
         <div className="tile empty">
           <p>Set up your workout days first, then your lifts will chart here.</p>
           <a className="btn" href={href({ name: "setup" })}>
@@ -93,7 +109,8 @@ export function ProgressScreen({ dayId: routeDayId }: { dayId: string | null }) 
       <ScreenHead
         title="Progress"
         className="tile progress-head"
-        sub={day.allExercises().some((e) => e.unit === "plates") ? "Plates counted in lb" : undefined}
+        sub={day.allExercises().some((e) => e.unit === "plates") ? `Plates counted in ${progressUnit}` : undefined}
+        actions={unitSwitch}
       />
       {/* Each picker is its own tile. A pick can change the page's height (a range with nothing
           logged), so the page holds its place for a moment and the pickers stay under your finger. */}

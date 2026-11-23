@@ -86,6 +86,58 @@ describe("Plates", () => {
     expect(convertLoad(2.5, "plates", "plates")).toBe(2.5);
     expect(convertLoad(230, "lb", "plates")).toBeNull(); // which plates? not guessed
   });
+
+  it("converts pounds and kilograms both ways to the nearest half, and plates to kilograms through pounds", () => {
+    expect(convertLoad(185, "lb", "kg")).toBe(84); // 83.91
+    expect(convertLoad(80, "kg", "lb")).toBe(176.5); // 176.37
+    expect(convertLoad(100, "kg", "lb")).toBe(220.5);
+    expect(convertLoad(45, "lb", "kg")).toBe(20.5); // 20.41
+    expect(convertLoad(2.5, "plates", "kg")).toBe(104.5); // 230 lb = 104.33 kg
+    expect(convertLoad(2.5, "plates", "lb")).toBe(230); // still exact
+    expect(convertLoad(80, "kg", "plates")).toBeNull();
+    expect(formatLoad(84, "kg")).toBe("84 kg");
+  });
+});
+
+describe("Kilograms", () => {
+  it("shows last time's weights in another unit, or as saved when that would be a guess", () => {
+    const pounds = ExerciseLog.empty("x").withSets([new SetEntry(185, 6), new SetEntry(175, 6)]).withUnit("lb");
+    const inKg = pounds.inUnit("kg", "lb");
+    expect([inKg.unit, inKg.summary(" – ")]).toEqual(["kg", "84/79.5 kg – 6/6"]);
+    expect(pounds.inUnit("lb", "lb")).toBe(pounds);
+    expect(pounds.inUnit("plates", "lb")).toBe(pounds); // pounds → plates isn't guessed
+    // A log saved without a unit reads in the exercise's bareUnit.
+    const unmarked = ExerciseLog.empty("x").withSets([new SetEntry(80, 8)]);
+    expect(unmarked.inUnit("lb", "kg").summary(" – ")).toBe("176.5 – 8");
+    // Bodyweight reps and notes have nothing to convert.
+    const bodyweight = ExerciseLog.empty("x").withSets([new SetEntry(null, 12)]);
+    expect(bodyweight.inUnit("kg", "lb")).toBe(bodyweight);
+  });
+
+  it("switches the unit from one exercise down, passing over plates and done / not done exercises", () => {
+    let day = WorkoutDay.create("Upper", 0);
+    for (const name of ["Pulldown", "Press", "Leg press", "Walk", "Curl", "Raise"]) day = day.addExercise(name);
+    const [pull, press, legs, walk, curl, raise] = day.activeExercises();
+    day = day.withExercise(legs!.withUnit("plates", "relabel")).withExercise(walk!.with({ kind: "check" }));
+    const units = (d: WorkoutDay) => d.activeExercises().map((e) => e.unit);
+
+    const kg = day.withWeightUnitFrom(pull!.id, "kg");
+    expect(units(kg)).toEqual(["kg", "kg", "plates", "lb", "kg", "kg"]); // Walk has no weights: untouched
+    // The fifth back to pounds: the fifth and sixth follow, the ones above stay in kilos.
+    const mixed = kg.withWeightUnitFrom(curl!.id, "lb");
+    expect(units(mixed)).toEqual(["kg", "kg", "plates", "lb", "lb", "lb"]);
+    // From the middle: only that one and below.
+    expect(units(day.withWeightUnitFrom(press!.id, "kg"))).toEqual(["lb", "kg", "plates", "lb", "kg", "kg"]);
+    // Nothing to change: the same day.
+    expect(mixed.withWeightUnitFrom(raise!.id, "lb")).toBe(mixed);
+    // Logs saved before the switch keep reading in pounds, and switching back stores nothing extra.
+    const switched = kg.exercise(pull!.id)!;
+    expect(switched.bareUnit).toBe("lb");
+    const back = kg.withWeightUnitFrom(pull!.id, "lb").exercise(pull!.id)!;
+    expect([back.unit, back.bareUnit]).toEqual(["lb", "lb"]);
+    expect(Object.keys(back.toJSON())).not.toContain("bareUnit");
+    expect(Object.keys(back.toJSON())).not.toContain("keyUnits");
+  });
 });
 
 describe("ExerciseLog", () => {
