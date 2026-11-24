@@ -4,6 +4,7 @@ import { Icon, type IconName } from "./components/Icon";
 import { trackPresses } from "./motion";
 import { pageOf, tabOf, type TabName } from "./pageLayout";
 import { href, type Route } from "./router";
+import { keepFullHeight } from "./viewport";
 
 const TABS: { name: TabName; label: string; icon: IconName; to: Route }[] = [
   { name: "home", label: "Home", icon: "home", to: { name: "home" } },
@@ -33,9 +34,12 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   }, []);
   // Sheets grow out of the button that opened them (D55).
   useEffect(() => trackPresses(document), []);
+  // On the iPhone Home Screen the window can stay short after the keyboard, lifting the tab bar (D57).
+  const shell = useRef<HTMLDivElement>(null);
+  useEffect(() => keepFullHeight(window, () => shell.current), []);
 
   return (
-    <div className="shell">
+    <div className="shell" ref={shell}>
       <nav className="tabbar" aria-label="Main">
         <div className="brand">
           <Icon name="barbell" size={24} />

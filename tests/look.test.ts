@@ -143,7 +143,7 @@ describe("tokens.css accents", () => {
       expect(Object.keys(accentRule(a.key)).sort(), a.key).toEqual(ACCENT_TOKENS.filter((t) => !t.startsWith("--accent-text") && !t.startsWith("--accent-solid")).sort());
     }
     expect(Object.values(accentRule("ink"))).toEqual(["initial", "initial", "initial", "initial"]);
-    expect(tokens.get(":root")).toMatchObject(accentRule("lime"));
+    expect(tokens.get(":root")).toMatchObject(accentRule("blue")); // the default (D58)
     // Lime and Blue keep the dark fills OLED and Graphite always had.
     expect(accentRule("lime")["--accent-d"]).toBe("#c6f432");
     expect(accentRule("blue")["--accent-d"]).toBe("#7db7ff");

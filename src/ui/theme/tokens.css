@@ -160,8 +160,16 @@
    backgrounds, panels, surfaces and tiles (tests/look.test.ts). On a Custom theme, look.ts
    moves the fill only if it doesn't read there. */
 
-/* Lime: the app's original accent (the default) */
+/* Blue: the default (D58; first, so a picked accent's rule below wins over :root) */
 :root,
+[data-accent="blue"] {
+  --accent-l: #2a5f9e;
+  --accent-ink-l: #ffffff;
+  --accent-d: #7db7ff;
+  --accent-ink-d: #00152e;
+}
+
+/* Lime: the app's original accent */
 [data-accent="lime"] {
   --accent-l: #3f6a0a;
   --accent-ink-l: #ffffff;
@@ -175,14 +183,6 @@
   --accent-ink-l: initial;
   --accent-d: initial;
   --accent-ink-d: initial;
-}
-
-/* Blue: Graphite's original accent */
-[data-accent="blue"] {
-  --accent-l: #2a5f9e;
-  --accent-ink-l: #ffffff;
-  --accent-d: #7db7ff;
-  --accent-ink-d: #00152e;
 }
 
 [data-accent="teal"] {
