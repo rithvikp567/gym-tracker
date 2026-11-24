@@ -11,8 +11,10 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Gym" />
     <meta name="description" content="Track sets, reps, and weight across weeks, months, and years." />
-    <link rel="icon" href="icons/favicon.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <!-- ?v=: a new address whenever the icon changes (blue since v0.6.4), so adding the app to the
+         Home Screen fetches the new one, not a copy an older service worker or the browser kept -->
+    <link rel="icon" href="icons/favicon.svg?v=2" type="image/svg+xml" />
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png?v=2" />
     <title>Gym Tracker</title>
     <!-- The look, before the first frame: the one this device showed last, which ui/LookSync.tsx
          saves as "gym-tracker.look" (theme, accent and family ids, the background for the browser
