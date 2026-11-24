@@ -969,7 +969,7 @@ describe("SettingsService", () => {
   const DEFAULT_VALUES = {
     theme: "oled",
     customThemeColor: null,
-    accent: "lime",
+    accent: "blue",
     customAccentColor: null,
     recentThemeColors: [],
     recentAccentColors: [],
@@ -1067,24 +1067,30 @@ describe("SettingsService", () => {
     expect(new SettingsService(store, clock).snapshot()).toEqual(copy);
   });
 
-  it("shows the accent each theme had until one is picked, and a theme change keeps the accent on screen", () => {
-    // Saved by v0.3.0: Graphite, no accent yet.
-    const old = new SettingsService(memoryStore({ theme: "graphite", showLastSession: true, updatedAt: "2026-11-21T10:00:00.000Z" }), clock);
-    expect(old.get().accent).toBe("blue");
-    expect(old.snapshot().values.accent).toBe("lime"); // the stored default, the same on every device
-    old.update({ theme: "sand" });
-    expect(old.get()).toMatchObject({ theme: "sand", accent: "blue" }); // kept as a pick
-    expect(old.snapshot().stamps?.accent).toBe(clock.now().toISOString());
-
-    // New: OLED and Lime. Picking Graphite keeps Lime.
+  it("shows Blue until an accent is picked, whatever an older version stored as the default, and a theme change keeps it", () => {
+    // New: OLED and Blue.
     const fresh = new SettingsService(memoryStore(), clock);
-    expect(fresh.get()).toMatchObject({ theme: "oled", accent: "lime" });
-    fresh.update({ theme: "graphite" });
-    expect(fresh.get()).toMatchObject({ theme: "graphite", accent: "lime" });
+    expect(fresh.get()).toMatchObject({ theme: "oled", accent: "blue" });
 
-    // A theme that shows the same accent stamps only the theme.
+    // Saved before D58 with Lime as the untouched default (stamped at the epoch), or by v0.3.0
+    // before accents were a setting: Blue now, while what's stored is sent on unchanged.
+    const untouched = { ...UNTOUCHED, theme: "2026-11-21T10:00:00.000Z" };
+    const limeDefault = new SettingsService(memoryStore({ ...DEFAULT_VALUES, accent: "lime", updatedAt: untouched.theme, stamps: untouched }), clock);
+    expect(limeDefault.get().accent).toBe("blue");
+    expect(limeDefault.snapshot().values.accent).toBe("lime");
+    const v030 = new SettingsService(memoryStore({ theme: "sand", showLastSession: true, updatedAt: "2026-11-21T10:00:00.000Z" }), clock);
+    expect(v030.get()).toMatchObject({ theme: "sand", accent: "blue" });
+
+    // Lime from another device's untouched default is still Blue here; Lime picked there is Lime.
+    limeDefault.applyRemote({ values: { accent: "lime" }, updatedAt: EPOCH, stamps: { accent: EPOCH } });
+    expect(limeDefault.get().accent).toBe("blue");
+    limeDefault.applyRemote({ values: { accent: "lime" }, updatedAt: "2026-11-21T11:00:00.000Z", stamps: { accent: "2026-11-21T11:00:00.000Z" } });
+    expect(limeDefault.get().accent).toBe("lime");
+
+    // A theme change stamps only the theme; the accent on screen stays.
     const light = new SettingsService(memoryStore(), clock);
-    light.update({ theme: "light" });
+    light.update({ theme: "graphite" });
+    expect(light.get()).toMatchObject({ theme: "graphite", accent: "blue" });
     expect(light.snapshot().stamps?.accent).toBe(EPOCH);
 
     // Picked accents stay put.

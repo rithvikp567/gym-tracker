@@ -26,7 +26,7 @@ export const THEMES: readonly { key: ThemeId; label: string; family: Family }[] 
   { key: "midnight", label: "Midnight", family: "dark" },
 ];
 
-/** Accent colors: buttons, borders, what's picked. Lime is the app's original; Ink is the text color. */
+/** Accent colors: buttons, borders, what's picked. Blue is the default (D58), Lime the app's original; Ink is the text color. */
 export const ACCENTS: readonly { key: AccentId; label: string }[] = [
   { key: "lime", label: "Lime" },
   { key: "ink", label: "Ink" },
@@ -69,7 +69,7 @@ export interface Settings {
 const DEFAULTS: Settings = {
   theme: "oled",
   customThemeColor: null,
-  accent: "lime",
+  accent: "blue",
   customAccentColor: null,
   recentThemeColors: [],
   recentAccentColors: [],
@@ -104,14 +104,14 @@ interface Stored extends Partial<Settings> {
  * Each setting carries its own stamp, so devices merge them one by one.
  * Add new options to `Settings`, `DEFAULTS`, and `sanitize`.
  *
- * An accent nobody ever picked (its stamp is still the epoch) shows the accent its theme had
- * before accents were a setting: Blue with Graphite, Lime otherwise. `get()` shows that;
- * `snapshot()` keeps the stored default, so every device holds the same untouched value.
+ * An accent nobody ever picked (its stamp is still the epoch) shows Blue, the default, whatever
+ * an older version stored for it (Lime was the default before D58). `get()` shows that;
+ * `snapshot()` sends what's stored, so an untouched accent never looks like a pick.
  */
 export class SettingsService implements SyncedPreferences {
   /** What's stored and synced. */
   private current: Settings;
-  /** What's shown: `current` with an unpicked accent filled in from the theme. */
+  /** What's shown: `current` with an unpicked accent shown as the default. */
   private shown: Settings;
   private stamps: Stamps;
   private readonly emitter = new Emitter<Settings>();
@@ -138,18 +138,12 @@ export class SettingsService implements SyncedPreferences {
 
   /**
    * Stamps only the settings in `changes`, so syncing them can't undo another device's newer
-   * change to a different one. A theme change never swaps the accent on screen: while no
-   * accent was picked, the one showing (Graphite's blue) is kept as a pick.
+   * change to a different one.
    */
   update(changes: Partial<Settings>): void {
     const now = this.clock.now();
     const changed = SETTING_KEYS.filter((k) => k in changes);
-    let next = sanitize({ ...this.current, ...changes });
-    if (!changed.includes("accent") && withShownAccent(next, this.stamps).accent !== this.shown.accent) {
-      next = { ...next, accent: this.shown.accent };
-      changed.push("accent");
-    }
-    this.current = next;
+    this.current = sanitize({ ...this.current, ...changes });
     this.stamps = { ...this.stamps, ...Object.fromEntries(changed.map((k) => [k, nextStamp(this.stamps[k], now)])) };
     this.save();
     this.localChanges.emit();
@@ -259,11 +253,10 @@ function readableKeys(current: Settings, values: Partial<Record<keyof Settings, 
   );
 }
 
-/** `settings` as shown: an accent nobody picked yet is the one its theme had before accents were a setting. */
+/** `settings` as shown: an accent nobody picked yet is the default, whatever an older version stored for it. */
 function withShownAccent(settings: Settings, stamps: Stamps): Settings {
-  if (Date.parse(stamps.accent) > 0) return settings;
-  const accent: AccentName = settings.theme === "graphite" ? "blue" : "lime";
-  return accent === settings.accent ? settings : { ...settings, accent };
+  if (Date.parse(stamps.accent) > 0 || settings.accent === DEFAULTS.accent) return settings;
+  return { ...settings, accent: DEFAULTS.accent };
 }
 
 /**

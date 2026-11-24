@@ -63,6 +63,10 @@ describe("Social screen", () => {
     expect(friends).toContain('<span class="score num" title="Planned workouts done this week">5/5</span>'); // Alex, Friday
     expect(friends).toContain("@sam_lifts");
     expect(friends).toContain(">Requested<");
+    // No friends yet: just the box to add one, with no grey line under it.
+    const none = render(s, createElement(FriendsList, { overview: { ...overview, friends: [], outgoing: [] } }));
+    expect(none).toContain('aria-label="Friend&#x27;s username"');
+    expect(none).not.toContain("social-empty");
 
     const rooms = render(s, createElement(RoomsList, { overview, meId: DEMO_ME }));
     expect(rooms).toContain(">New room<");

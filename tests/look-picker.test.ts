@@ -394,7 +394,7 @@ describe("the color picker", () => {
     // Held: the picker follows, the page still shows what it had.
     const [before, after] = byClass("cp-compare")[0]!.childNodes as unknown as FakeElement[];
     expect(after!.style.getPropertyValue("--swatch")).not.toBe(before!.style.getPropertyValue("--swatch"));
-    expect(shown()).toEqual({ theme: "oled", accent: "lime", vars: {} });
+    expect(shown()).toEqual({ theme: "oled", accent: "blue", vars: {} });
     act(() => dispatch(win, "pointerup"));
     await frame();
     expect(shown().accent).toBe("custom"); // let go: applied at once
@@ -417,7 +417,7 @@ describe("the color picker", () => {
       expect(shown().theme, way).toBe("custom");
       leave();
       expect(pickerOpen(), way).toBe(false);
-      expect(shown(), way).toEqual({ theme: "oled", accent: "lime", vars: {} });
+      expect(shown(), way).toEqual({ theme: "oled", accent: "blue", vars: {} });
       expect(html.getAttribute("data-look-preview"), way).toBeNull();
     }
     expect(update).not.toHaveBeenCalled();
@@ -462,7 +462,7 @@ describe("the color picker", () => {
     slide(byClass("cp-range")[0]!, 70);
     expect(shown().theme).toBe("custom");
     render(false); // Back, a swipe, another tab: the screen goes, the picker with it
-    expect(shown()).toEqual({ theme: "oled", accent: "lime", vars: {} });
+    expect(shown()).toEqual({ theme: "oled", accent: "blue", vars: {} });
     act(() => services.settings.update({ theme: "sand" }));
     expect(shown().theme).toBe("sand");
   });
@@ -473,6 +473,6 @@ describe("the color picker", () => {
     expect(shown().accent).toBe("custom");
     act(() => dispatch(win, "hashchange"));
     expect(pickerOpen()).toBe(false);
-    expect(shown()).toEqual({ theme: "oled", accent: "lime", vars: {} });
+    expect(shown()).toEqual({ theme: "oled", accent: "blue", vars: {} });
   });
 });

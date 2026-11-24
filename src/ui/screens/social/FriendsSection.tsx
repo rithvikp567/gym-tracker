@@ -117,9 +117,6 @@ export function FriendsList({ overview }: { overview: SocialOverview }) {
       <div className="tile stack">
         <AddFriend />
       </div>
-      {overview.friends.length === 0 && overview.outgoing.length === 0 && (
-        <p className="social-empty">Add a friend by their username to see their week here.</p>
-      )}
       {overview.friends.length > 0 && (
         <div className="day-cards social-cards">
           {overview.friends.map((f) => (

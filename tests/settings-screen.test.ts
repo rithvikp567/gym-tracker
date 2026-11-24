@@ -85,9 +85,9 @@ describe("Settings screen", () => {
     const html = render(makeServices());
     const radios = [...html.matchAll(/role="radio"[^>]*aria-checked="(true|false)"/g)];
     expect(radios).toHaveLength(9 + 7); // 8 accents + Custom, 6 themes + Custom
-    expect(html).toMatch(/data-accent="lime" aria-checked="true"/);
+    expect(html).toMatch(/data-accent="blue" aria-checked="true"/);
     expect(html).toMatch(/aria-checked="true"><span class="theme-mini" data-theme="oled"/);
-    expect(html).toContain('<span class="look-value" aria-hidden="true">Lime</span>');
+    expect(html).toContain('<span class="look-value" aria-hidden="true">Blue</span>');
     expect(html).toContain('<span class="look-value" aria-hidden="true">OLED</span>');
     expect(html).not.toContain("Match device");
   });
