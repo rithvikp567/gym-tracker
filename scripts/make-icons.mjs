@@ -1,5 +1,6 @@
 /**
- * Renders the app icons (public/icons/) from one SVG design: a lime barbell on black.
+ * Renders the app icons (public/icons/) from one SVG design: a blue barbell on black, the
+ * default accent's dark fill (Blue, D58; it was lime before).
  * The PNGs are committed, so this only runs when the icon changes.
  *
  *   npm run icons
@@ -15,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 const OUT = fileURLToPath(new URL("../public/icons/", import.meta.url));
 const BROWSER = process.env.BROWSER ?? "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser";
-const LIME = "#c6f432";
+const BLUE = "#7db7ff";
 
 /** A barbell (Tabler "barbell" geometry), drawn in a 24-unit box and scaled. `pad` leaves room for maskable crops. */
 function svg(size, pad) {
@@ -24,7 +25,7 @@ function svg(size, pad) {
   const offset = size * pad;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
   <rect width="${size}" height="${size}" fill="#000"/>
-  <g transform="translate(${offset} ${offset}) scale(${scale})" fill="none" stroke="${LIME}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(${offset} ${offset}) scale(${scale})" fill="none" stroke="${BLUE}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
     <path d="M2 12h1"/><path d="M6 8h-2a1 1 0 0 0 -1 1v6a1 1 0 0 0 1 1h2"/>
     <path d="M6 7v10a1 1 0 0 0 1 1h1a1 1 0 0 0 1 -1v-10a1 1 0 0 0 -1 -1h-1a1 1 0 0 0 -1 1z"/>
     <path d="M9 12h6"/>
